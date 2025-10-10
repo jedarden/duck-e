@@ -119,12 +119,11 @@ The easiest way to run DUCK-E is using our pre-built Docker container:
 # Pull the latest image
 docker pull ghcr.io/jedarden/duck-e:latest
 
-# Run with your API keys
+# Run with your API keys (models auto-configured!)
 docker run -d \
   -p 8000:8000 \
   -e OPENAI_API_KEY=your_openai_key \
   -e WEATHER_API_KEY=your_weather_key \
-  -e OAI_CONFIG_LIST='[{"model":"gpt-5-mini","api_key":"your_key"},{"model":"gpt-realtime","api_key":"your_key","tags":["gpt-realtime"]}]' \
   ghcr.io/jedarden/duck-e:latest
 ```
 
@@ -144,7 +143,6 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - WEATHER_API_KEY=${WEATHER_API_KEY}
-      - OAI_CONFIG_LIST=${OAI_CONFIG_LIST}
     restart: unless-stopped
 ```
 
@@ -164,34 +162,25 @@ docker-compose up -d
 
 ### Environment Configuration
 
+DUCK-E now features **automatic configuration generation**! Simply provide your OpenAI API key, and the system will automatically configure all necessary models.
+
 Create a `.env` file in the `ducke` directory:
 
 ```bash
 # OpenAI API Configuration
+# REQUIRED: Just add your API key - models are configured automatically!
 OPENAI_API_KEY=sk-proj-your-api-key-here
 
 # Weather API Configuration
 WEATHER_API_KEY=your_weather_api_key_here
-
-# OAI Configuration List (JSON format)
-# This configures the models available to DUCK-E
-OAI_CONFIG_LIST='[
-  {
-    "model":"gpt-5-mini",
-    "api_key":"sk-proj-your-key"
-  },
-  {
-    "model":"gpt-5",
-    "api_key":"sk-proj-your-key",
-    "tags":["gpt-5-full"]
-  },
-  {
-    "model":"gpt-realtime",
-    "api_key":"sk-proj-your-key",
-    "tags":["gpt-realtime"]
-  }
-]'
 ```
+
+That's it! The application automatically configures:
+- **gpt-5-mini**: Fast responses for general queries
+- **gpt-5**: Advanced reasoning for complex problems
+- **gpt-realtime**: Real-time voice interaction
+
+**Advanced Users:** You can still manually override the configuration by providing `OAI_CONFIG_LIST` in your `.env` file (see `.env.example` for format).
 
 ### Installation
 

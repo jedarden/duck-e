@@ -7,31 +7,28 @@ from logging import getLogger
 from openai import OpenAI
 from pathlib import Path
 from typing import Annotated
-import autogen
 import httpx
 import json
 import meilisearch
 import os
 import requests
 
-# Load and validate realtime configuration
+# Import configuration module for automatic OAI_CONFIG_LIST generation
+from app.config import get_realtime_config, get_swarm_config, validate_config
+
+# Load and validate realtime configuration using auto-generated config
+logger = getLogger("uvicorn.error")
+
 try:
-    realtime_config_list = autogen.config_list_from_json(
-        "OAI_CONFIG_LIST",
-        filter_dict={
-            "tags": ["gpt-realtime"],
-        },
-    )
+    realtime_config_list = get_realtime_config()
 
     if not realtime_config_list:
-        logger = getLogger("uvicorn.error")
         logger.warning(
-            "WARNING: No realtime models found in OAI_CONFIG_LIST. "
-            "WebSocket connections will fail. Please add entries tagged with 'gpt-realtime'."
+            "WARNING: No realtime models found in auto-generated configuration. "
+            "WebSocket connections will fail. Please ensure OPENAI_API_KEY is set."
         )
 except Exception as e:
-    logger = getLogger("uvicorn.error")
-    logger.error(f"Failed to load OAI_CONFIG_LIST for realtime models: {e}")
+    logger.error(f"Failed to load realtime configuration: {e}")
     realtime_config_list = []
 
 # Create custom httpx client with longer timeout for OpenAI Realtime API connections
@@ -60,24 +57,17 @@ realtime_llm_config = {
     "http_client": httpx_client  # Use custom httpx client with longer timeouts
 }
 
-# Load and validate swarm configuration
+# Load and validate swarm configuration using auto-generated config
 try:
-    swarm_config_list = autogen.config_list_from_json(
-        "OAI_CONFIG_LIST",
-        filter_dict={
-            "model": ["gpt-5", "gpt-5-mini"],
-        },
-    )
+    swarm_config_list = get_swarm_config()
 
     if not swarm_config_list:
-        logger = getLogger("uvicorn.error")
         logger.warning(
-            "WARNING: No GPT-5 models found in OAI_CONFIG_LIST. "
+            "WARNING: No GPT-5 models found in auto-generated configuration. "
             "Some features may not work correctly."
         )
 except Exception as e:
-    logger = getLogger("uvicorn.error")
-    logger.error(f"Failed to load OAI_CONFIG_LIST for swarm models: {e}")
+    logger.error(f"Failed to load swarm configuration: {e}")
     swarm_config_list = []
 
 swarm_llm_config = {
