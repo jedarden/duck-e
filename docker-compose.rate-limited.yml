@@ -1,0 +1,115 @@
+services:
+  # Redis for distributed rate limiting and cost tracking
+  redis:
+    image: redis:7.2-alpine
+    container_name: duck-e-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - duck-e-network
+
+  # DUCK-E application with rate limiting enabled
+  duck-e:
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: duck-e
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Redis configuration
+      - REDIS_URL=redis://redis:6379/0
+
+      # Rate limiting configuration
+      - RATE_LIMIT_ENABLED=true
+      - RATE_LIMIT_STATUS=60/minute
+      - RATE_LIMIT_MAIN_PAGE=30/minute
+      - RATE_LIMIT_WEBSOCKET=5/minute
+      - RATE_LIMIT_WEATHER_API=10/hour
+      - RATE_LIMIT_WEB_SEARCH=5/hour
+
+      # Cost protection configuration
+      - COST_PROTECTION_ENABLED=true
+      - COST_PROTECTION_MAX_SESSION_COST_USD=5.0
+      - COST_PROTECTION_MAX_SESSION_DURATION_MINUTES=30
+      - COST_PROTECTION_MAX_TOTAL_COST_PER_HOUR_USD=50.0
+      - COST_PROTECTION_CIRCUIT_BREAKER_THRESHOLD_USD=100.0
+
+      # Prometheus metrics
+      - ENABLE_METRICS=true
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - duck-e-network
+
+  # Prometheus for metrics collection (optional)
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: duck-e-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    restart: unless-stopped
+    networks:
+      - duck-e-network
+
+  # Grafana for visualization (optional)
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: duck-e-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - duck-e-network
+
+networks:
+  duck-e-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local

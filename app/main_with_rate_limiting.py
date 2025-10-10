@@ -21,27 +21,17 @@ from app.config import get_realtime_config, get_swarm_config, validate_config
 from app.middleware import (
     create_security_headers_middleware,
     configure_cors,
-    get_websocket_security_middleware
-)
-
-# Import cost protection middleware
-from app.middleware.cost_protection import (
-    CostProtectionMiddleware,
-    get_cost_tracker
-)
-
-# Import rate limiting middleware
-from app.middleware.rate_limiting import (
+    get_websocket_security_middleware,
+    # Rate limiting and cost protection
     limiter,
-    get_rate_limit_config,
-    custom_rate_limit_exceeded_handler
+    RateLimitMiddleware,
+    CostProtectionMiddleware,
+    custom_rate_limit_exceeded_handler,
+    get_cost_tracker,
+    get_rate_limit_for_endpoint
 )
 from slowapi.errors import RateLimitExceeded
-
-# Import input validators and sanitizers
-from app.models.validators import LocationInput, SearchQuery, AcceptLanguage
-from app.security.sanitizers import sanitize_url_parameter, sanitize_api_response
-from pydantic import ValidationError
+from prometheus_client import make_asgi_app
 
 # Load and validate realtime configuration using auto-generated config
 logger = getLogger("uvicorn.error")
@@ -113,44 +103,39 @@ openai_client = OpenAI(
 # Initialize FastAPI application
 app = FastAPI()
 
-# Add rate limiter state to app
-# This is required by slowapi
-app.state.limiter = limiter
-
-# Add rate limit exceeded exception handler
-app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
+# Initialize cost tracker
+cost_tracker = get_cost_tracker()
 
 # Configure CORS for public access
 # Reads from ALLOWED_ORIGINS environment variable
 configure_cors(app)
+
+# Add middleware (order matters - last added runs first)
+app.add_middleware(CostProtectionMiddleware)
+app.add_middleware(RateLimitMiddleware)
 
 # Add security headers middleware
 # Reads from ENABLE_HSTS, CSP_REPORT_URI environment variables
 security_middleware = create_security_headers_middleware()
 app.add_middleware(security_middleware)
 
-# Add cost protection middleware
-# Reads from COST_PROTECTION_* environment variables
-cost_protection_middleware = CostProtectionMiddleware(app)
-app.add_middleware(lambda app: cost_protection_middleware)
+# Register rate limit exception handler
+app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
+
+# Mount Prometheus metrics endpoint
+metrics_app = make_asgi_app()
+app.mount("/metrics", metrics_app)
+
+# Add limiter to app state
+app.state.limiter = limiter
 
 # Initialize WebSocket security validator
 ws_security = get_websocket_security_middleware()
 
-# Initialize cost tracker for WebSocket sessions
-cost_tracker = get_cost_tracker()
-
-# Load rate limit configuration
-rate_limit_config = get_rate_limit_config()
-
 
 @app.get("/status", response_class=JSONResponse)
-@limiter.limit(rate_limit_config.status_limit)
+@limiter.limit(get_rate_limit_for_endpoint("/status"))
 async def index_page(request: Request):
-    """
-    Health check endpoint with rate limiting
-    Rate limit: 60 requests per minute per IP
-    """
     return {"message": "WebRTC DUCK-E Server is running!"}
 
 
@@ -166,25 +151,17 @@ templates = Jinja2Templates(directory=website_files_path / "templates")
 
 
 @app.get("/", response_class=HTMLResponse)
-@limiter.limit(rate_limit_config.main_page_limit)
+@limiter.limit(get_rate_limit_for_endpoint("/"))
 async def start_chat(request: Request):
-    """
-    Main page endpoint with rate limiting
-    Rate limit: 30 requests per minute per IP
-    """
+    """Endpoint to return the HTML page for audio chat."""
     port = request.url.port
     return templates.TemplateResponse("chat.html", {"request": request, "port": port})
 
 
 @app.websocket("/session")
-@limiter.limit(rate_limit_config.websocket_limit)
+@limiter.limit(get_rate_limit_for_endpoint("/session"))
 async def handle_media_stream(websocket: WebSocket, request: Request):
-    """
-    WebSocket endpoint with rate limiting
-    Rate limit: 5 connections per minute per IP
-
-    Handles real-time audio streaming with OpenAI's Realtime API
-    """
+    """Handle WebSocket connections providing audio stream and OpenAI."""
     # Validate WebSocket origin before accepting connection
     if not await ws_security.validate_connection(websocket):
         # Connection rejected by security middleware
@@ -193,37 +170,14 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
     # Generate unique session ID for cost tracking
     session_id = str(uuid.uuid4())
 
+    # Start cost tracking session
+    await cost_tracker.start_session(session_id)
+
     # Retrieve and log incoming headers
     headers = websocket.headers
-    logger = getLogger("uvicorn.error")
     logger.info(f"Incoming WebSocket headers: {headers}")
-    logger.info(f"Session ID for cost tracking: {session_id}")
+    logger.info(f"Session ID: {session_id}")
     logger.info(headers.get('x-forwarded-user'))
-
-    # Initialize cost tracking for this session
-    await cost_tracker.start_session(session_id)
-    logger.info(f"Cost tracking started for session: {session_id}")
-
-    # Check circuit breaker before allowing connection
-    await cost_tracker.check_circuit_breaker()
-    if cost_tracker.circuit_breaker_active:
-        logger.warning(f"Circuit breaker active - rejecting session: {session_id}")
-        try:
-            await websocket.send_json({
-                "type": "service_unavailable",
-                "error": "System is currently under high load due to cost limits",
-                "message": "Please try again later",
-                "circuit_breaker_active": True,
-                "reset_time": cost_tracker.circuit_breaker_reset_time.isoformat() if cost_tracker.circuit_breaker_reset_time else None
-            })
-        except Exception:
-            pass
-        try:
-            await websocket.close(code=1013, reason="Service temporarily unavailable")
-        except Exception:
-            pass
-        await cost_tracker.end_session(session_id)
-        return
 
     # Validate configuration before initializing RealtimeAgent
     try:
@@ -263,18 +217,9 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
 
         logger.info(f"Initializing RealtimeAgent with config: {len(realtime_llm_config['config_list'])} model(s) configured")
 
-        # Validate accept-language header
-        accept_language_raw = headers.get('accept-language', 'en-US')
-        try:
-            validated_language = AcceptLanguage(language=accept_language_raw)
-            safe_language = validated_language.language
-        except ValidationError as e:
-            logger.warning(f"Invalid accept-language header: {accept_language_raw}, error: {e}")
-            safe_language = "en-US"  # Fallback to safe default
-
         realtime_agent = RealtimeAgent(
             name="DUCK-E",
-            system_message=f"You are an AI voice assistant named DUCK-E (pronounced ducky). You can answer questions about weather (make sure to localize units based on the location), or search the web for current information. \n\nUse the web_search_preview tool for recent news, current events, or information beyond your knowledge fall back to the web_search tool if needed. The tool will automatically acknowledge the request and provide search results. Keep responses brief, two short sentences maximum. If conducting a web search, explain what is being searched. The user's browser is configured for this language <language>{safe_language}</language>",
+            system_message=f"You are an AI voice assistant named DUCK-E (pronounced ducky). You can answer questions about weather (make sure to localize units based on the location), or search the web for current information. \n\nUse the web_search_preview tool for recent news, current events, or information beyond your knowledge fall back to the web_search tool if needed. The tool will automatically acknowledge the request and provide search results. Keep responses brief, two short sentences maximum. If conducting a web search, explain what is being searched. The user's browser is configured for this language <language>{headers.get('accept-language')}</language>",
             llm_config=realtime_llm_config,
             websocket=websocket,
             logger=logger,
@@ -287,6 +232,7 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
             "error": error_msg
         })
         await websocket.close(code=1008, reason="Configuration access error")
+        await cost_tracker.end_session(session_id)
         return
     except Exception as e:
         error_msg = f"Failed to initialize RealtimeAgent: {str(e)}"
@@ -296,94 +242,45 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
             "error": error_msg
         })
         await websocket.close(code=1011, reason="Agent initialization failed")
+        await cost_tracker.end_session(session_id)
         return
 
     @realtime_agent.register_realtime_function(  # type: ignore [misc]
         name="get_current_weather", description="Get the current weather in a given city."
     )
     def get_current_weather(location: Annotated[str, "city"]) -> str:
-        """
-        Get current weather with validated and sanitized location input.
-        Security: Prevents SQL injection, command injection, XSS, SSRF, URL injection
-        """
-        try:
-            # Validate location input
-            validated_location = LocationInput(location=location)
-            safe_location = validated_location.location
+        url = f"https://api.weatherapi.com/v1/current.json?key={os.getenv('WEATHER_API_KEY')}&q={location}&aqi=no"
+        response = requests.get(url)
+        logger.info(f"<-- Calling get_current_weather function for {location} -->")
 
-            logger.info(f"<-- Calling get_current_weather function for {safe_location} -->")
+        # Track weather API usage (estimated tokens)
+        # This is a rough estimate - adjust based on actual response size
+        asyncio.create_task(cost_tracker.track_usage(
+            session_id=session_id,
+            model="external-api",
+            input_tokens=50,
+            output_tokens=len(response.text) // 4  # Rough estimate: 4 chars per token
+        ))
 
-            # Use requests.get with params dict for safe URL encoding
-            # This prevents URL injection attacks
-            response = requests.get(
-                "https://api.weatherapi.com/v1/current.json",
-                params={
-                    "key": os.getenv('WEATHER_API_KEY'),
-                    "q": safe_location,
-                    "aqi": "no"
-                },
-                timeout=10
-            )
-
-            # Sanitize API response before returning
-            if response.status_code == 200:
-                response_data = response.json()
-                sanitized_response = sanitize_api_response(response_data)
-                return json.dumps(sanitized_response)
-            else:
-                logger.error(f"Weather API error: {response.status_code} - {response.text}")
-                return json.dumps({"error": "Unable to fetch weather data"})
-
-        except ValidationError as e:
-            logger.error(f"Location validation failed for '{location}': {e}")
-            return json.dumps({"error": "Invalid location format. Please provide a valid city name."})
-        except Exception as e:
-            logger.error(f"Weather API error for '{location}': {e}")
-            return json.dumps({"error": "Unable to fetch weather data"})
+        return response.text
 
     @realtime_agent.register_realtime_function(  # type: ignore [misc]
         name="get_weather_forecast", description="Get the weather forecast in a given city."
     )
     def get_weather_forecast(location: Annotated[str, "city"]) -> str:
-        """
-        Get weather forecast with validated and sanitized location input.
-        Security: Prevents SQL injection, command injection, XSS, SSRF, URL injection
-        """
-        try:
-            # Validate location input
-            validated_location = LocationInput(location=location)
-            safe_location = validated_location.location
+        url = f"https://api.weatherapi.com/v1/forecast.json?key={os.getenv('WEATHER_API_KEY')}&q={location}&days=3&aqi=no&alerts=no"
+        response = requests.get(url)
+        logger.info(f"<-- Calling get_weather_forecast function for {location} -->")
 
-            logger.info(f"<-- Calling get_weather_forecast function for {safe_location} -->")
+        # Track weather API usage
+        asyncio.create_task(cost_tracker.track_usage(
+            session_id=session_id,
+            model="external-api",
+            input_tokens=50,
+            output_tokens=len(response.text) // 4
+        ))
 
-            # Use requests.get with params dict for safe URL encoding
-            response = requests.get(
-                "https://api.weatherapi.com/v1/forecast.json",
-                params={
-                    "key": os.getenv('WEATHER_API_KEY'),
-                    "q": safe_location,
-                    "days": "3",
-                    "aqi": "no",
-                    "alerts": "no"
-                },
-                timeout=10
-            )
-
-            # Sanitize API response before returning
-            if response.status_code == 200:
-                response_data = response.json()
-                sanitized_response = sanitize_api_response(response_data)
-                return json.dumps(sanitized_response)
-            else:
-                logger.error(f"Weather API error: {response.status_code} - {response.text}")
-                return json.dumps({"error": "Unable to fetch weather forecast"})
-
-        except ValidationError as e:
-            logger.error(f"Location validation failed for '{location}': {e}")
-            return json.dumps({"error": "Invalid location format. Please provide a valid city name."})
-        except Exception as e:
-            logger.error(f"Weather API error for '{location}': {e}")
-            return json.dumps({"error": "Unable to fetch weather forecast"})
+        return response.text
 
     @realtime_agent.register_realtime_function(  # type: ignore [misc]
         name="web_search",
@@ -391,16 +288,12 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
     )
     def web_search(query: Annotated[str, "search_query"]) -> str:
         """
-        Search the web using OpenAI's native web_search tool with validated input.
-        Security: Prevents SQL injection, prompt injection, XSS, command injection
+        Search the web using OpenAI's native web_search tool.
+        This function leverages OpenAI's built-in web search capabilities for real-time information.
         """
+        logger.info(f"<-- Executing native web search for query: {query} -->")
+
         try:
-            # Validate search query
-            validated_query = SearchQuery(query=query)
-            safe_query = validated_query.query
-
-            logger.info(f"<-- Executing native web search for query: {safe_query} -->")
-
             # Use OpenAI's chat completions with native web_search tool
             # This is the updated approach for gpt-realtime models with native tool support
             response = openai_client.chat.completions.create(
@@ -412,7 +305,7 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
                     },
                     {
                         "role": "user",
-                        "content": safe_query
+                        "content": query
                     }
                 ],
                 tools=[
@@ -439,6 +332,15 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
                 user="duck-e-web-search"
             )
 
+            # Track web search API usage
+            if hasattr(response, 'usage'):
+                asyncio.create_task(cost_tracker.track_usage(
+                    session_id=session_id,
+                    model="gpt-5-mini",
+                    input_tokens=response.usage.prompt_tokens,
+                    output_tokens=response.usage.completion_tokens
+                ))
+
             # Extract the response content
             if response.choices and len(response.choices) > 0:
                 message = response.choices[0].message
@@ -460,14 +362,12 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
                 logger.warning("Empty response from web search")
                 return "No search results found. Please try a different query."
 
-        except ValidationError as e:
-            logger.error(f"Search query validation failed for '{query}': {e}")
-            return "Invalid search query. Please rephrase your question."
         except Exception as e:
             logger.error(f"Web search error: {str(e)}", exc_info=True)
             return "I'm having trouble searching the web right now. I can help with general questions or information about our business clients."
 
     try:
+        # Run realtime agent with cost tracking
         await realtime_agent.run()
     except Exception as e:
         error_msg = f"RealtimeAgent runtime error: {str(e)}"
@@ -483,3 +383,7 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
             await websocket.close(code=1011, reason="Runtime error")
         except:
             pass  # Websocket may already be closed
+    finally:
+        # End cost tracking session
+        await cost_tracker.end_session(session_id)
+        logger.info(f"Session {session_id} ended")

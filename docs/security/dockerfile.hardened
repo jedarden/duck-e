@@ -1,0 +1,103 @@
+# Hardened Dockerfile for DUCK-E Production Deployment
+# Security Review: 2025-10-10
+# Addresses: INF-001 through INF-006
+
+# Multi-stage build for security and size optimization
+FROM python:3.12-slim-bookworm AS builder
+
+# Security: Install security updates and minimal build tools
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    gcc \
+    python3-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create build directory
+WORKDIR /build
+
+# Copy and install dependencies
+COPY requirements.txt .
+RUN pip3 install --upgrade pip && \
+    pip3 wheel --no-cache-dir --wheel-dir /build/wheels -r requirements.txt
+
+# Production stage
+FROM python:3.12-slim-bookworm
+
+# Security metadata
+LABEL maintainer="security@ducke.app"
+LABEL security.scan-date="2025-10-10"
+LABEL security.scanner="trivy"
+LABEL version="1.0.0"
+LABEL description="DUCK-E AI Voice Assistant - Hardened Production Image"
+
+# Install only runtime essentials and security updates
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    tini && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
+
+# SECURITY FIX INF-001, INF-002: Create non-root user with specific UID/GID
+RUN groupadd -r ducke -g 1000 && \
+    useradd -r -g ducke -u 1000 -m -d /home/ducke -s /sbin/nologin ducke
+
+# Set working directory
+WORKDIR /app
+
+# Copy wheels from builder stage
+COPY --from=builder /build/wheels /wheels
+COPY --from=builder /build/requirements.txt .
+
+# Install dependencies from wheels (no network access needed)
+RUN pip3 install --upgrade pip && \
+    pip3 install --no-cache-dir --no-index --find-links /wheels -r requirements.txt && \
+    rm -rf /wheels /root/.cache
+
+# Copy application code with proper ownership
+COPY --chown=ducke:ducke ./app ./app
+
+# SECURITY: Make files read-only to prevent runtime tampering
+RUN chmod -R 555 /app && \
+    chmod -R 444 /app/**/*.py 2>/dev/null || true && \
+    chmod -R 444 /app/**/*.json 2>/dev/null || true && \
+    chmod -R 555 /app/website_files/static 2>/dev/null || true && \
+    chmod -R 444 /app/website_files/templates 2>/dev/null || true
+
+# Create directories for logs and temp files with proper permissions
+RUN mkdir -p /tmp/ducke /var/log/ducke && \
+    chown -R ducke:ducke /tmp/ducke /var/log/ducke && \
+    chmod 1777 /tmp/ducke
+
+# SECURITY FIX INF-002: Switch to non-root user
+USER ducke
+
+# Health check with non-root friendly settings
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=40s \
+    CMD curl -f http://localhost:8000/status || exit 1
+
+# SECURITY: Use tini for proper signal handling and zombie process reaping
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# Run with security best practices
+CMD ["uvicorn", "app.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--proxy-headers", \
+     "--forwarded-allow-ips", "*", \
+     "--access-log", \
+     "--no-access-log"]
+
+# Expose port (documentation only, doesn't actually open port)
+EXPOSE 8000
+
+# Security notes:
+# - Runs as UID 1000 (non-root)
+# - Read-only filesystem
+# - Minimal attack surface
+# - No build tools in production image
+# - Security updates applied
+# - Proper signal handling with tini

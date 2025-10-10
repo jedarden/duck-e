@@ -15,3 +15,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    # Resource limits for single instance deployment
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M

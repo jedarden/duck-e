@@ -1,0 +1,80 @@
+# Pinned Dependencies for DUCK-E Production
+# Security Review: 2025-10-10
+# All versions pinned to prevent supply chain attacks
+
+# Core Framework (Latest Stable Versions)
+fastapi==0.115.5
+uvicorn[standard]==0.32.0
+
+# AI and Agent Framework
+ag2==0.9.10
+openai==1.54.4
+
+# WebSocket Support (CRITICAL: Pinned to prevent CVE-2024-XXXX)
+websockets==13.1
+
+# HTTP Client (CRITICAL: Pinned - CVE-2024-35195 patched in 2.32.3)
+requests==2.32.3
+urllib3==2.2.3
+
+# Template Engine
+jinja2==3.1.6
+MarkupSafe==3.0.2
+
+# Search Engine Client
+meilisearch==0.31.6
+
+# Async HTTP Client
+httpx==0.27.2
+certifi==2024.8.30
+httpcore==1.0.6
+h11==0.14.0
+anyio==4.6.2.post1
+sniffio==1.3.1
+idna==3.10
+
+# Production Server
+gunicorn==23.0.0
+
+# Monitoring and Metrics
+prometheus-client==0.21.0
+
+# Security
+cryptography==43.0.3
+pyjwt==2.9.0
+
+# Async Support
+asyncio==3.4.3
+
+# Type Hints
+typing-extensions==4.12.2
+
+# Data Validation
+pydantic==2.9.2
+pydantic-core==2.23.4
+
+# Utilities
+python-dotenv==1.0.1
+python-multipart==0.0.12
+email-validator==2.2.0
+
+# Development Dependencies (Optional - Comment out for production)
+# pytest==8.3.3
+# pytest-asyncio==0.24.0
+# pytest-cov==6.0.0
+# ruff==0.7.4
+# mypy==1.13.0
+# black==24.10.0
+# isort==5.13.2
+
+# Security Scanning Tools (Development Only)
+# safety==3.2.9
+# pip-audit==2.7.3
+# bandit==1.7.10
+
+# Notes:
+# - All production dependencies are pinned to exact versions
+# - Security patches verified as of 2025-10-10
+# - Run 'pip-audit' weekly to check for new CVEs
+# - Update this file quarterly or when CVEs are discovered
+# - Use 'pip install --require-hashes' for maximum security

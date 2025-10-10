@@ -1,0 +1,150 @@
+# Security Configuration for DUCK-E
+# This file defines security policies for the public-facing application
+
+# CORS Configuration
+cors:
+  # Allowed origins for cross-origin requests
+  # In production, replace with your actual domain(s)
+  # Examples:
+  #   - https://example.com
+  #   - https://*.example.com (wildcard subdomain)
+  #   - http://localhost:3000 (development)
+  allowed_origins:
+    # Production domains (replace with your domain)
+    - https://duck-e.example.com
+    - https://*.duck-e.example.com
+
+    # Development/Testing (remove in production)
+    - http://localhost:3000
+    - http://localhost:8000
+    - http://localhost:5173
+    - http://127.0.0.1:3000
+    - http://127.0.0.1:8000
+    - http://127.0.0.1:5173
+
+  # Allow credentials (cookies, authorization headers)
+  allow_credentials: true
+
+  # Allowed HTTP methods
+  allowed_methods:
+    - GET
+    - POST
+    - OPTIONS
+
+  # Allowed headers
+  allowed_headers:
+    - "*"
+
+  # Preflight cache duration (seconds)
+  max_age: 600
+
+# Security Headers Configuration
+security_headers:
+  # HTTP Strict Transport Security (HSTS)
+  hsts:
+    enabled: true
+    max_age: 31536000  # 1 year in seconds
+    include_subdomains: true
+    preload: false  # Set to true when ready for HSTS preload list
+
+  # Content Security Policy (CSP)
+  csp:
+    # Use default policy or provide custom
+    use_default: true
+
+    # Custom CSP policy (overrides default if provided)
+    # custom_policy: "default-src 'self'; script-src 'self' 'unsafe-inline'"
+
+    # CSP Report URI for violation reporting
+    # report_uri: https://example.com/csp-report
+
+    # Default policy components (used when use_default is true)
+    default_src: "'self'"
+    script_src: "'self' 'unsafe-inline'"  # Allow inline scripts for WebRTC
+    style_src: "'self' 'unsafe-inline'"   # Allow inline styles
+    img_src: "'self' data: https:"
+    connect_src: "'self' wss: https:"     # Allow WebSocket connections
+    font_src: "'self' data:"
+    object_src: "'none'"
+    base_uri: "'self'"
+    form_action: "'self'"
+    frame_ancestors: "'none'"
+    upgrade_insecure_requests: true
+
+  # Permissions Policy (Feature Policy)
+  permissions_policy:
+    microphone: "(self)"      # Allow microphone for voice chat
+    camera: "()"              # Disable camera
+    geolocation: "()"         # Disable geolocation
+    payment: "()"             # Disable payment API
+    usb: "()"                 # Disable USB
+    magnetometer: "()"        # Disable magnetometer
+    gyroscope: "()"           # Disable gyroscope
+    accelerometer: "()"       # Disable accelerometer
+
+  # Other security headers
+  x_content_type_options: "nosniff"
+  x_frame_options: "DENY"
+  x_xss_protection: "1; mode=block"
+  referrer_policy: "strict-origin-when-cross-origin"
+
+# WebSocket Security
+websocket:
+  # Origin validation
+  validate_origin: true
+  require_origin: true  # Require Origin header to be present
+
+  # Connection timeout (seconds)
+  connection_timeout: 300  # 5 minutes
+
+  # Allowed origins (inherits from CORS if not specified)
+  # allowed_origins:
+  #   - https://duck-e.example.com
+
+  # Rate limiting (placeholder for future implementation)
+  rate_limit:
+    enabled: false
+    max_connections_per_ip: 10
+    window_seconds: 60
+
+# Environment-specific overrides
+environments:
+  # Development environment
+  development:
+    cors:
+      allowed_origins:
+        - http://localhost:3000
+        - http://localhost:8000
+        - http://localhost:5173
+        - http://127.0.0.1:3000
+        - http://127.0.0.1:8000
+        - http://127.0.0.1:5173
+    security_headers:
+      hsts:
+        enabled: false  # Disable HSTS in development
+
+  # Production environment
+  production:
+    cors:
+      # IMPORTANT: Set your production domain(s)
+      allowed_origins:
+        - https://duck-e.example.com
+        - https://*.duck-e.example.com
+    security_headers:
+      hsts:
+        enabled: true
+        preload: true  # Enable HSTS preload in production
+    websocket:
+      validate_origin: true
+      require_origin: true
+
+# Audit and Logging
+audit:
+  # Log security events
+  log_security_events: true
+
+  # Log rejected connections
+  log_rejected_connections: true
+
+  # Log level for security events
+  security_log_level: "WARNING"
