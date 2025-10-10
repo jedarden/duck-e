@@ -138,58 +138,70 @@ const toggleToolLog = () => {
 
 // Setup WebRTC event handlers to capture tool calls
 const setupToolCallListeners = (webRTCInstance) => {
-  // Monitor WebSocket messages for function calls
-  if (webRTCInstance && webRTCInstance.socket) {
-    const originalSend = webRTCInstance.socket.send.bind(webRTCInstance.socket);
-    const originalOnMessage = webRTCInstance.socket.onmessage;
+  // Initialize pending tool calls storage
+  if (!window.pendingToolCalls) {
+    window.pendingToolCalls = {};
+  }
 
-    // Intercept outgoing messages (tool call requests)
-    webRTCInstance.socket.send = function(data) {
-      try {
-        const message = JSON.parse(data);
-        if (message.type === 'function_call_output' || message.type === 'response.function_call_arguments.done') {
-          console.log('Tool call detected:', message);
-        }
-      } catch (e) {
-        // Not JSON or not a tool call
-      }
-      return originalSend(data);
-    };
+  // Hook into the WebRTC message handler
+  if (webRTCInstance && webRTCInstance.pc) {
+    // Monitor data channel messages
+    const originalOnDataChannel = webRTCInstance.pc.ondatachannel;
 
-    // Intercept incoming messages (tool call responses)
-    webRTCInstance.socket.onmessage = function(event) {
-      try {
-        const message = JSON.parse(event.data);
+    webRTCInstance.pc.ondatachannel = function(event) {
+      const dataChannel = event.channel;
 
-        // Check for function call in the message
-        if (message.type === 'response.function_call_arguments.done') {
-          const toolName = message.name || 'unknown';
-          const params = message.arguments ? JSON.parse(message.arguments) : {};
+      // Save original onmessage handler
+      const originalOnMessage = dataChannel.onmessage;
 
-          // Store pending call
-          if (!window.pendingToolCalls) {
-            window.pendingToolCalls = {};
+      // Intercept data channel messages
+      dataChannel.onmessage = function(msgEvent) {
+        try {
+          const message = JSON.parse(msgEvent.data);
+
+          // Check for function call completion
+          if (message.type === 'response.function_call_arguments.done') {
+            const toolName = message.name || 'unknown';
+            const params = message.arguments ? JSON.parse(message.arguments) : {};
+            const callId = message.call_id || message.item_id;
+
+            console.log('Tool call detected:', toolName, params);
+
+            // Store pending call
+            window.pendingToolCalls[callId] = {
+              toolName,
+              params,
+              timestamp: new Date()
+            };
           }
-          window.pendingToolCalls[message.call_id] = { toolName, params };
-        }
 
-        // Check for function call output (response)
-        if (message.type === 'conversation.item.created' && message.item?.type === 'function_call_output') {
-          const callId = message.item.call_id;
-          const response = message.item.output || 'No response';
+          // Check for function call output (response)
+          if (message.type === 'conversation.item.create' && message.item?.type === 'function_call_output') {
+            const callId = message.item.call_id;
+            const response = message.item.output || 'No response';
 
-          if (window.pendingToolCalls && window.pendingToolCalls[callId]) {
-            const { toolName, params } = window.pendingToolCalls[callId];
-            addToolCall(toolName, params, response);
-            delete window.pendingToolCalls[callId];
+            console.log('Tool response received:', callId, response);
+
+            if (window.pendingToolCalls[callId]) {
+              const { toolName, params } = window.pendingToolCalls[callId];
+              addToolCall(toolName, params, response);
+              delete window.pendingToolCalls[callId];
+            }
           }
+        } catch (e) {
+          // Not JSON or not relevant
+          console.debug('Non-JSON or irrelevant message:', e);
         }
-      } catch (e) {
-        // Not JSON or not relevant
-      }
 
-      if (originalOnMessage) {
-        return originalOnMessage.call(this, event);
+        // Call original handler
+        if (originalOnMessage) {
+          return originalOnMessage.call(this, msgEvent);
+        }
+      };
+
+      // Call original ondatachannel handler
+      if (originalOnDataChannel) {
+        return originalOnDataChannel.call(this, event);
       }
     };
   }
