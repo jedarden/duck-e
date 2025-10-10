@@ -8,6 +8,7 @@ from openai import OpenAI
 from pathlib import Path
 from typing import Annotated
 import autogen
+import httpx
 import json
 import meilisearch
 import os
@@ -33,13 +34,30 @@ except Exception as e:
     logger.error(f"Failed to load OAI_CONFIG_LIST for realtime models: {e}")
     realtime_config_list = []
 
+# Create custom httpx client with longer timeout for OpenAI Realtime API connections
+# The default timeout is too short for establishing TLS connections to OpenAI's API
+httpx_client = httpx.AsyncClient(
+    timeout=httpx.Timeout(
+        timeout=120.0,  # 120 second total timeout
+        connect=60.0,   # 60 seconds for connection establishment (including TLS handshake)
+        read=60.0,      # 60 seconds for reading responses
+        write=30.0,     # 30 seconds for writing requests
+        pool=10.0       # 10 seconds for acquiring connection from pool
+    ),
+    limits=httpx.Limits(
+        max_connections=100,
+        max_keepalive_connections=20
+    )
+)
+
 realtime_llm_config = {
-    "timeout": 86400,
+    "timeout": 300,  # 5 minute timeout for overall operation
     "config_list": realtime_config_list,
     "temperature": 1.0,
     "parallel_tool_calls": True,  # Enable parallel tool execution
     "tool_choice": "auto",  # Allow model to decide when to use tools
-    "tools": [{ "type": "web_search_preview" }]
+    "tools": [{ "type": "web_search_preview" }],
+    "http_client": httpx_client  # Use custom httpx client with longer timeouts
 }
 
 # Load and validate swarm configuration
