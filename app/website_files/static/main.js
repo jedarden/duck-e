@@ -1,6 +1,5 @@
 let webRTC; // Global variable for our WebRTC instance.
 let connectionStatus = false; // false means not connected
-let toolCallLog = []; // Array to store tool calls
 
 // Function to update the UI elements based on connection status.
 const updateUI = (status) => {
@@ -32,193 +31,6 @@ const updateUI = (status) => {
   }
 };
 
-// Format timestamp for display
-const formatTime = (date) => {
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  });
-};
-
-// Truncate long strings for display
-const truncateString = (str, maxLength = 200) => {
-  if (!str) return '';
-  if (str.length <= maxLength) return str;
-  return str.substring(0, maxLength) + '...';
-};
-
-// Add tool call to the log
-const addToolCall = (toolName, params, response) => {
-  const timestamp = new Date();
-
-  toolCallLog.push({
-    toolName,
-    params,
-    response,
-    timestamp
-  });
-
-  // Update UI
-  updateToolLogDisplay();
-};
-
-// Update the tool log display
-const updateToolLogDisplay = () => {
-  const toolCount = document.getElementById('tool-count');
-  const toolLogEmpty = document.getElementById('tool-log-empty');
-  const toolLogEntries = document.getElementById('tool-log-entries');
-  const clearButton = document.getElementById('clear-log');
-
-  // Update count badge
-  toolCount.textContent = toolCallLog.length;
-
-  if (toolCallLog.length === 0) {
-    toolLogEmpty.style.display = 'block';
-    toolLogEntries.style.display = 'none';
-    clearButton.style.display = 'none';
-  } else {
-    toolLogEmpty.style.display = 'none';
-    toolLogEntries.style.display = 'block';
-    clearButton.style.display = 'block';
-
-    // Render tool call entries (most recent first)
-    toolLogEntries.innerHTML = toolCallLog
-      .slice()
-      .reverse()
-      .map((call, index) => {
-        const paramsStr = typeof call.params === 'object'
-          ? JSON.stringify(call.params, null, 2)
-          : String(call.params);
-
-        const responseStr = typeof call.response === 'object'
-          ? JSON.stringify(call.response, null, 2)
-          : truncateString(String(call.response), 500);
-
-        return `
-          <div class="tool-entry">
-            <div class="tool-entry-header">
-              <span class="tool-name">${call.toolName}</span>
-              <span class="tool-timestamp">${formatTime(call.timestamp)}</span>
-            </div>
-            <div>
-              <div class="tool-label">Parameters</div>
-              <div class="tool-params">${paramsStr}</div>
-            </div>
-            <div>
-              <div class="tool-label">Response</div>
-              <div class="tool-response">${responseStr}</div>
-            </div>
-          </div>
-        `;
-      })
-      .join('');
-  }
-};
-
-// Clear tool log
-const clearToolLog = () => {
-  toolCallLog = [];
-  updateToolLogDisplay();
-};
-
-// Toggle tool log visibility
-const toggleToolLog = () => {
-  const content = document.getElementById('tool-log-content');
-  const toggle = document.getElementById('tool-log-toggle');
-
-  if (content.classList.contains('expanded')) {
-    content.classList.remove('expanded');
-    toggle.classList.remove('expanded');
-  } else {
-    content.classList.add('expanded');
-    toggle.classList.add('expanded');
-  }
-};
-
-// Setup WebRTC event handlers to capture tool calls
-const setupToolCallListeners = (webRTCInstance) => {
-  // Initialize pending tool calls storage
-  if (!window.pendingToolCalls) {
-    window.pendingToolCalls = {};
-  }
-
-  // Use a polling approach to find the data channel after connection
-  const checkForDataChannel = () => {
-    if (webRTCInstance && webRTCInstance.pc && webRTCInstance.pc.connectionState === 'connected') {
-      console.log('WebRTC connected, looking for data channel...');
-
-      // Try to find the data channel through different paths
-      if (webRTCInstance.dc) {
-        console.log('Found data channel via webRTC.dc');
-        interceptDataChannel(webRTCInstance.dc);
-      } else if (webRTCInstance.dataChannel) {
-        console.log('Found data channel via webRTC.dataChannel');
-        interceptDataChannel(webRTCInstance.dataChannel);
-      } else {
-        console.log('Could not find data channel, will try again...');
-        setTimeout(checkForDataChannel, 100);
-      }
-    } else {
-      setTimeout(checkForDataChannel, 100);
-    }
-  };
-
-  const interceptDataChannel = (dataChannel) => {
-    console.log('Intercepting data channel messages...');
-
-    // Save original onmessage handler
-    const originalOnMessage = dataChannel.onmessage;
-
-    // Intercept data channel messages
-    dataChannel.onmessage = function(msgEvent) {
-      try {
-        const message = JSON.parse(msgEvent.data);
-
-        // Check for function call completion
-        if (message.type === 'response.function_call_arguments.done') {
-          const toolName = message.name || 'unknown';
-          const params = message.arguments ? JSON.parse(message.arguments) : {};
-          const callId = message.call_id || message.item_id;
-
-          console.log('🛠️ Tool call detected:', toolName, params);
-
-          // Store pending call
-          window.pendingToolCalls[callId] = {
-            toolName,
-            params,
-            timestamp: new Date()
-          };
-        }
-
-        // Check for function call output (response)
-        if (message.type === 'conversation.item.create' && message.item?.type === 'function_call_output') {
-          const callId = message.item.call_id;
-          const response = message.item.output || 'No response';
-
-          console.log('✅ Tool response received:', callId);
-
-          if (window.pendingToolCalls[callId]) {
-            const { toolName, params } = window.pendingToolCalls[callId];
-            addToolCall(toolName, params, response);
-            delete window.pendingToolCalls[callId];
-          }
-        }
-      } catch (e) {
-        // Not JSON or not relevant - silence this error
-      }
-
-      // Call original handler
-      if (originalOnMessage) {
-        return originalOnMessage.call(this, msgEvent);
-      }
-    };
-  };
-
-  // Start checking for data channel
-  setTimeout(checkForDataChannel, 100);
-};
-
 const toggleConnection = async () => {
   if (!connectionStatus) {
     // User is attempting to connect.
@@ -232,9 +44,6 @@ const toggleConnection = async () => {
         updateUI("disconnected");
         connectionStatus = false;
       };
-
-      // Setup tool call monitoring BEFORE connecting
-      setupToolCallListeners(webRTC);
 
       await webRTC.connect();
 
@@ -263,18 +72,6 @@ document.addEventListener("DOMContentLoaded", () => {
   const toggleButton = document.getElementById("toggle-connection");
   toggleButton.addEventListener("click", toggleConnection);
 
-  // Setup tool log toggle
-  const toolLogHeader = document.getElementById("tool-log-header");
-  toolLogHeader.addEventListener("click", toggleToolLog);
-
-  // Setup clear log button
-  const clearButton = document.getElementById("clear-log");
-  clearButton.addEventListener("click", (e) => {
-    e.stopPropagation(); // Prevent toggle
-    clearToolLog();
-  });
-
   // Initialize UI
   updateUI("disconnected");
-  updateToolLogDisplay();
 });
