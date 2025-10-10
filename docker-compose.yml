@@ -5,12 +5,12 @@ services:
       dockerfile: dockerfile
     container_name: duck-e
     ports:
-      - "5050:5050"
+      - "8000:8000"
     env_file:
       - .env
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5050/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/status"]
       interval: 30s
       timeout: 10s
       retries: 3
