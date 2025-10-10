@@ -430,6 +430,173 @@
             }
         }
 
+        /* Tool Call Log Styles */
+        .tool-log-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 40px var(--shadow);
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .tool-log-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 30px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s ease;
+        }
+
+        .tool-log-header:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .tool-log-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .tool-log-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 24px;
+            height: 24px;
+            padding: 0 8px;
+            background: var(--primary);
+            color: white;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .tool-log-toggle {
+            font-size: 1.5rem;
+            transition: transform 0.3s ease;
+            color: var(--text-secondary);
+        }
+
+        .tool-log-toggle.expanded {
+            transform: rotate(180deg);
+        }
+
+        .tool-log-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .tool-log-content.expanded {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .tool-log-entries {
+            padding: 0 30px 20px;
+        }
+
+        .tool-entry {
+            background: var(--bg-tertiary);
+            border-left: 3px solid var(--primary);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .tool-entry-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .tool-name {
+            font-weight: 600;
+            color: var(--primary-light);
+            font-size: 0.875rem;
+        }
+
+        .tool-timestamp {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            margin-left: auto;
+        }
+
+        .tool-params {
+            background: var(--bg-primary);
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            overflow-x: auto;
+        }
+
+        .tool-response {
+            background: var(--bg-primary);
+            border-radius: 6px;
+            padding: 10px;
+            margin-top: 8px;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .tool-label {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.75rem;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .tool-log-empty {
+            padding: 40px 30px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 0.875rem;
+        }
+
+        .tool-log-clear {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px 16px;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .tool-log-clear:hover {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
         /* Accessibility */
         @media (prefers-reduced-motion: reduce) {
             *,
@@ -481,6 +648,26 @@
                 <button id="toggle-connection">
                     <span id="button-text">Connect</span>
                 </button>
+            </div>
+
+            <!-- Tool Call Log -->
+            <div class="tool-log-card">
+                <div class="tool-log-header" id="tool-log-header">
+                    <div class="tool-log-title">
+                        <span>🛠️ Tool Call Log</span>
+                        <span class="tool-log-badge" id="tool-count">0</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <button class="tool-log-clear" id="clear-log" style="display: none;">Clear Log</button>
+                        <div class="tool-log-toggle" id="tool-log-toggle">▼</div>
+                    </div>
+                </div>
+                <div class="tool-log-content" id="tool-log-content">
+                    <div class="tool-log-empty" id="tool-log-empty">
+                        No tool calls yet. Connect and ask DUCK-E about weather, search the web, or ask questions!
+                    </div>
+                    <div class="tool-log-entries" id="tool-log-entries" style="display: none;"></div>
+                </div>
             </div>
 
             <!-- Features card -->

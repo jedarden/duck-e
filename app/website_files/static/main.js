@@ -1,5 +1,6 @@
 let webRTC; // Global variable for our WebRTC instance.
 let connectionStatus = false; // false means not connected
+let toolCallLog = []; // Array to store tool calls
 
 // Function to update the UI elements based on connection status.
 const updateUI = (status) => {
@@ -31,6 +32,169 @@ const updateUI = (status) => {
   }
 };
 
+// Format timestamp for display
+const formatTime = (date) => {
+  return date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+};
+
+// Truncate long strings for display
+const truncateString = (str, maxLength = 200) => {
+  if (!str) return '';
+  if (str.length <= maxLength) return str;
+  return str.substring(0, maxLength) + '...';
+};
+
+// Add tool call to the log
+const addToolCall = (toolName, params, response) => {
+  const timestamp = new Date();
+
+  toolCallLog.push({
+    toolName,
+    params,
+    response,
+    timestamp
+  });
+
+  // Update UI
+  updateToolLogDisplay();
+};
+
+// Update the tool log display
+const updateToolLogDisplay = () => {
+  const toolCount = document.getElementById('tool-count');
+  const toolLogEmpty = document.getElementById('tool-log-empty');
+  const toolLogEntries = document.getElementById('tool-log-entries');
+  const clearButton = document.getElementById('clear-log');
+
+  // Update count badge
+  toolCount.textContent = toolCallLog.length;
+
+  if (toolCallLog.length === 0) {
+    toolLogEmpty.style.display = 'block';
+    toolLogEntries.style.display = 'none';
+    clearButton.style.display = 'none';
+  } else {
+    toolLogEmpty.style.display = 'none';
+    toolLogEntries.style.display = 'block';
+    clearButton.style.display = 'block';
+
+    // Render tool call entries (most recent first)
+    toolLogEntries.innerHTML = toolCallLog
+      .slice()
+      .reverse()
+      .map((call, index) => {
+        const paramsStr = typeof call.params === 'object'
+          ? JSON.stringify(call.params, null, 2)
+          : String(call.params);
+
+        const responseStr = typeof call.response === 'object'
+          ? JSON.stringify(call.response, null, 2)
+          : truncateString(String(call.response), 500);
+
+        return `
+          <div class="tool-entry">
+            <div class="tool-entry-header">
+              <span class="tool-name">${call.toolName}</span>
+              <span class="tool-timestamp">${formatTime(call.timestamp)}</span>
+            </div>
+            <div>
+              <div class="tool-label">Parameters</div>
+              <div class="tool-params">${paramsStr}</div>
+            </div>
+            <div>
+              <div class="tool-label">Response</div>
+              <div class="tool-response">${responseStr}</div>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+};
+
+// Clear tool log
+const clearToolLog = () => {
+  toolCallLog = [];
+  updateToolLogDisplay();
+};
+
+// Toggle tool log visibility
+const toggleToolLog = () => {
+  const content = document.getElementById('tool-log-content');
+  const toggle = document.getElementById('tool-log-toggle');
+
+  if (content.classList.contains('expanded')) {
+    content.classList.remove('expanded');
+    toggle.classList.remove('expanded');
+  } else {
+    content.classList.add('expanded');
+    toggle.classList.add('expanded');
+  }
+};
+
+// Setup WebRTC event handlers to capture tool calls
+const setupToolCallListeners = (webRTCInstance) => {
+  // Monitor WebSocket messages for function calls
+  if (webRTCInstance && webRTCInstance.socket) {
+    const originalSend = webRTCInstance.socket.send.bind(webRTCInstance.socket);
+    const originalOnMessage = webRTCInstance.socket.onmessage;
+
+    // Intercept outgoing messages (tool call requests)
+    webRTCInstance.socket.send = function(data) {
+      try {
+        const message = JSON.parse(data);
+        if (message.type === 'function_call_output' || message.type === 'response.function_call_arguments.done') {
+          console.log('Tool call detected:', message);
+        }
+      } catch (e) {
+        // Not JSON or not a tool call
+      }
+      return originalSend(data);
+    };
+
+    // Intercept incoming messages (tool call responses)
+    webRTCInstance.socket.onmessage = function(event) {
+      try {
+        const message = JSON.parse(event.data);
+
+        // Check for function call in the message
+        if (message.type === 'response.function_call_arguments.done') {
+          const toolName = message.name || 'unknown';
+          const params = message.arguments ? JSON.parse(message.arguments) : {};
+
+          // Store pending call
+          if (!window.pendingToolCalls) {
+            window.pendingToolCalls = {};
+          }
+          window.pendingToolCalls[message.call_id] = { toolName, params };
+        }
+
+        // Check for function call output (response)
+        if (message.type === 'conversation.item.created' && message.item?.type === 'function_call_output') {
+          const callId = message.item.call_id;
+          const response = message.item.output || 'No response';
+
+          if (window.pendingToolCalls && window.pendingToolCalls[callId]) {
+            const { toolName, params } = window.pendingToolCalls[callId];
+            addToolCall(toolName, params, response);
+            delete window.pendingToolCalls[callId];
+          }
+        }
+      } catch (e) {
+        // Not JSON or not relevant
+      }
+
+      if (originalOnMessage) {
+        return originalOnMessage.call(this, event);
+      }
+    };
+  }
+};
+
 const toggleConnection = async () => {
   if (!connectionStatus) {
     // User is attempting to connect.
@@ -46,6 +210,10 @@ const toggleConnection = async () => {
       };
 
       await webRTC.connect();
+
+      // Setup tool call monitoring
+      setupToolCallListeners(webRTC);
+
       updateUI("connected");
       connectionStatus = true;
     } catch (error) {
@@ -71,6 +239,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const toggleButton = document.getElementById("toggle-connection");
   toggleButton.addEventListener("click", toggleConnection);
 
+  // Setup tool log toggle
+  const toolLogHeader = document.getElementById("tool-log-header");
+  toolLogHeader.addEventListener("click", toggleToolLog);
+
+  // Setup clear log button
+  const clearButton = document.getElementById("clear-log");
+  clearButton.addEventListener("click", (e) => {
+    e.stopPropagation(); // Prevent toggle
+    clearToolLog();
+  });
+
   // Initialize UI
   updateUI("disconnected");
+  updateToolLogDisplay();
 });
