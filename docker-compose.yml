@@ -1,0 +1,17 @@
+services:
+  duck-e:
+    build:
+      context: .
+      dockerfile: dockerfile
+    container_name: duck-e
+    ports:
+      - "5050:5050"
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5050/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
