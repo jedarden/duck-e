@@ -369,9 +369,9 @@ COST_PROTECTION_MAX_SESSION_COST_USD=5.0
 
 ### Security Documentation
 
-- 📚 **Quick Start**: See `QUICK_START_SECURITY.md` (8-hour deployment)
+- 📚 **Quick Start**: See `docs/QUICK_START_SECURITY.md` (8-hour deployment)
 - 📊 **Complete Guide**: See `docs/security/SECURITY_OVERVIEW.md`
-- 🏢 **Deployment**: See `IN_MEMORY_DEPLOYMENT.md`
+- 🏢 **Deployment**: See `docs/IN_MEMORY_DEPLOYMENT.md`
 - ✅ **Test Coverage**: 92% with 180+ security tests
 
 **All security controls active by default** - no configuration required!
