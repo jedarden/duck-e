@@ -109,9 +109,54 @@ The FastAPI application with:
 - `get_weather_forecast(location)`: 3-day weather forecast
 - `web_search(query)`: Web search using OpenAI's native capabilities
 
+## Quick Start with Docker (Recommended)
+
+### Using Pre-built Container
+
+The easiest way to run DUCK-E is using our pre-built Docker container:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/jedarden/ducke:latest
+
+# Run with your API keys
+docker run -d \
+  -p 8000:8000 \
+  -e OPENAI_API_KEY=your_openai_key \
+  -e WEATHER_API_KEY=your_weather_key \
+  -e OAI_CONFIG_LIST='[{"model":"gpt-5-mini","api_key":"your_key"},{"model":"gpt-realtime","api_key":"your_key","tags":["gpt-realtime"]}]' \
+  ghcr.io/jedarden/ducke:latest
+```
+
+Then navigate to `http://localhost:8000` and start talking!
+
+### Docker Compose
+
+Create a `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+services:
+  ducke:
+    image: ghcr.io/jedarden/ducke:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WEATHER_API_KEY=${WEATHER_API_KEY}
+      - OAI_CONFIG_LIST=${OAI_CONFIG_LIST}
+    restart: unless-stopped
+```
+
+Run with:
+```bash
+docker-compose up -d
+```
+
 ## Setup & Installation
 
 ### Prerequisites
+- Docker (for containerized deployment) OR
 - Python 3.9+
 - Node.js 16+ (for development tools)
 - OpenAI API key with access to GPT-5/Realtime models
