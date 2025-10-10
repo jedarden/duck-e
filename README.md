@@ -117,7 +117,7 @@ The easiest way to run DUCK-E is using our pre-built Docker container:
 
 ```bash
 # Pull the latest image
-docker pull ghcr.io/jedarden/ducke:latest
+docker pull ghcr.io/jedarden/duck-e:latest
 
 # Run with your API keys
 docker run -d \
@@ -125,7 +125,7 @@ docker run -d \
   -e OPENAI_API_KEY=your_openai_key \
   -e WEATHER_API_KEY=your_weather_key \
   -e OAI_CONFIG_LIST='[{"model":"gpt-5-mini","api_key":"your_key"},{"model":"gpt-realtime","api_key":"your_key","tags":["gpt-realtime"]}]' \
-  ghcr.io/jedarden/ducke:latest
+  ghcr.io/jedarden/duck-e:latest
 ```
 
 Then navigate to `http://localhost:8000` and start talking!
@@ -137,8 +137,8 @@ Create a `docker-compose.yml`:
 ```yaml
 version: '3.8'
 services:
-  ducke:
-    image: ghcr.io/jedarden/ducke:latest
+  duck-e:
+    image: ghcr.io/jedarden/duck-e:latest
     ports:
       - "8000:8000"
     environment:
