@@ -273,7 +273,10 @@ const updateUI = (status) => {
     buttonText.innerHTML = '<span class="spinner"></span>';
     toggleButton.disabled = true;
     muteBtn.disabled = true;
-    if (pttControls) pttControls.classList.add('disabled');
+    // Hide PTT controls while connecting
+    if (pttControls) {
+      pttControls.style.display = 'none';
+    }
   } else if (status === "connected") {
     statusIndicator.classList.add("connected");
     statusText.textContent = "Connected - DUCK-E is listening";
@@ -281,14 +284,23 @@ const updateUI = (status) => {
     toggleButton.classList.add("connected");
     toggleButton.disabled = false;
     muteBtn.disabled = false;
-    if (pttControls) pttControls.classList.remove('disabled');
+    // Show PTT controls when connected
+    if (pttControls) {
+      pttControls.style.display = 'flex';
+      pttControls.classList.remove('disabled');
+    }
+    // Apply saved PTT state now that we're connected
+    updatePTTUI(isPushToTalk);
   } else if (status === "disconnected") {
     statusIndicator.classList.add("disconnected");
     statusText.textContent = "Ready to Connect";
     buttonText.textContent = "Connect";
     toggleButton.disabled = false;
     muteBtn.disabled = false; // Allow setting mute preference before connecting
-    if (pttControls) pttControls.classList.add('disabled');
+    // Hide PTT controls when disconnected
+    if (pttControls) {
+      pttControls.style.display = 'none';
+    }
     // Keep mute state (don't reset on disconnect)
     // Keep transcript visible but don't clear it
   }
