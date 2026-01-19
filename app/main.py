@@ -144,14 +144,12 @@ cost_tracker = get_cost_tracker()
 rate_limit_config = get_rate_limit_config()
 
 
-@app.get("/status", response_class=JSONResponse)
-@limiter.limit(rate_limit_config.status_limit)
+@app.get("/status")
 async def index_page(request: Request):
     """
-    Health check endpoint with rate limiting
-    Rate limit: 60 requests per minute per IP
+    Health check endpoint (no rate limiting for monitoring)
     """
-    return {"message": "WebRTC DUCK-E Server is running!"}
+    return JSONResponse({"message": "WebRTC DUCK-E Server is running!", "version": "0.2.5"})
 
 
 website_files_path = Path(__file__).parent / "website_files"
