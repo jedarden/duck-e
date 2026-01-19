@@ -240,7 +240,13 @@ def get_rate_limit_for_endpoint(endpoint: str) -> str:
     return limits.get(endpoint, config.default_limit)
 
 
-# Redis health check removed - using in-memory storage only
+# Redis health check stub - always returns healthy since we use in-memory storage
+def check_redis_health() -> bool:
+    """
+    Health check stub for rate limiting.
+    Always returns True since we use in-memory storage (no Redis).
+    """
+    return True
 
 
 # Custom rate limit exceeded handler with enhanced error response
