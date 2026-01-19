@@ -673,9 +673,9 @@
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const socketUrl = `${protocol}://${window.location.host}/session`;
     </script>
-    <script src="https://github.com/ag2ai/ag2-js-client/releases/download/v0.3.1/index.global.js"></script>
-    <!-- Markdown rendering -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- Bundled locally for CSP compliance -->
+    <script src="/static/ag2client.js"></script>
+    <script src="/static/marked.min.js"></script>
     <script src="/static/main.js" type="module" defer></script>
 </head>
 <body>

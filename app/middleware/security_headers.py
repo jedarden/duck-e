@@ -80,10 +80,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         csp_directives = [
             "default-src 'self'",
             "script-src 'self' 'unsafe-inline'",  # Allow inline scripts for WebRTC
-            "style-src 'self' 'unsafe-inline'",   # Allow inline styles
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",  # Allow Google Fonts CSS
             "img-src 'self' data: https:",         # Allow images from same origin, data URIs, HTTPS
             "connect-src 'self' wss: https:",      # Allow WebSocket and HTTPS connections
-            "font-src 'self' data:",               # Allow fonts from same origin and data URIs
+            "font-src 'self' data: https://fonts.gstatic.com",  # Allow Google Fonts
             "object-src 'none'",                   # Disable plugins
             "base-uri 'self'",                     # Restrict base tag
             "form-action 'self'",                  # Restrict form submissions
