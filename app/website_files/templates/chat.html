@@ -856,24 +856,54 @@
                 transform: none;
             }
 
-            /* When has history: connection card fixed at bottom */
+            /* When has history: hide full connection card, show inline controls */
             .main-content.has-history {
-                padding-bottom: 200px; /* Space for fixed controls */
+                padding-bottom: 100px; /* Space for fixed inline controls */
             }
 
             .main-content.has-history .connection-card {
+                display: none;
+            }
+
+            .main-content.has-history .inline-controls {
+                display: flex;
+                flex-wrap: wrap;
                 position: fixed;
                 bottom: 0;
                 left: 0;
                 right: 0;
                 z-index: 100;
                 border-radius: 20px 20px 0 0;
-                padding: 15px;
-                padding-bottom: calc(15px + env(safe-area-inset-bottom, 0px));
+                padding: 12px 15px;
+                padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
                 margin: 0;
                 box-shadow: 0 -5px 30px var(--shadow);
                 background: var(--bg-secondary);
-                order: 99;
+                gap: 10px;
+                justify-content: center;
+            }
+
+            .main-content.has-history .inline-controls .status-indicator {
+                width: 8px;
+                height: 8px;
+            }
+
+            .main-content.has-history .inline-controls .status-text {
+                font-size: 0.8rem;
+            }
+
+            .main-content.has-history .inline-controls .audio-btn {
+                padding: 8px 14px;
+                font-size: 0.8rem;
+            }
+
+            .main-content.has-history .inline-controls .ptt-btn-inline {
+                padding: 8px 14px;
+                font-size: 0.85rem;
+            }
+
+            .main-content.has-history .transcript-card {
+                border-radius: 20px 20px 0 0;
             }
 
             .status-container {
