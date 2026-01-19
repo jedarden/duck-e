@@ -288,6 +288,7 @@ var ag2client = (() => {
           }
         };
         const _dc = pc.createDataChannel("oai-events");
+        let transcriptionEnabled = false;
         _dc.addEventListener("message", (e) => {
           let message;
           try {
@@ -295,6 +296,20 @@ var ag2client = (() => {
           } catch (error) {
             console.error("Error parsing message", e.data, error);
             return;
+          }
+          // Enable input audio transcription after session is created
+          if (message.type === "session.created" && !transcriptionEnabled) {
+            transcriptionEnabled = true;
+            const transcriptionConfig = {
+              type: "session.update",
+              session: {
+                input_audio_transcription: {
+                  model: "whisper-1"
+                }
+              }
+            };
+            _dc.send(JSON.stringify(transcriptionConfig));
+            console.log("Enabled input audio transcription after session.created");
           }
           // Forward all messages to onMessage callback for transcript handling
           if (webRTC.onMessage) {
@@ -341,17 +356,7 @@ var ag2client = (() => {
             _dc.send(JSON.stringify(init_chunk));
           }
           console.log("Sent init chunks to OpenAI WebRTC");
-          // Enable input audio transcription so user speech appears in transcript
-          const transcriptionConfig = {
-            type: "session.update",
-            session: {
-              input_audio_transcription: {
-                model: "whisper-1"
-              }
-            }
-          };
-          _dc.send(JSON.stringify(transcriptionConfig));
-          console.log("Enabled input audio transcription");
+          // Note: input_audio_transcription is enabled after session.created event in message handler
           for (const qmsg of quedMessages) {
             _dc.send(qmsg);
           }
