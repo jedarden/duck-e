@@ -571,6 +571,8 @@
                 display: flex;
                 flex-wrap: wrap;
                 flex-shrink: 0; /* Don't shrink controls */
+                position: relative;
+                z-index: 10; /* Ensure controls are above transcript card */
             }
 
             .main-content.has-history .transcript-card,
@@ -588,9 +590,9 @@
                 flex: 1;
                 overflow-y: auto;
                 min-height: 0; /* Critical for scrolling in flex container */
+                max-height: none; /* Override base max-height: 300px */
                 border-radius: 12px 12px 0 0; /* Rounded top only */
                 margin: 0;
-                padding-bottom: 15px; /* Keep some padding at bottom for content */
             }
 
             .main-content.has-history .features-card {
