@@ -1,5 +1,7 @@
 # 🦆 DUCK-E: The Duck That Talks Back
 
+**DUCK-E** stands for **D**igitally **U**nified **C**onversational **K**nowledge **E**ngine — an AI-powered voice assistant that revolutionizes rubber duck debugging by actively engaging in your debugging process.
+
 ## What is Rubber Ducking?
 
 **Rubber duck debugging** is a time-honored programming technique where developers explain their code, line-by-line, to an inanimate rubber duck. The simple act of verbalizing the problem often leads to discovering the solution yourself.
