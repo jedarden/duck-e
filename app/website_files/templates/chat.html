@@ -520,8 +520,35 @@
             color: var(--danger);
         }
 
-        /* Desktop: show inline controls when has-history class is present */
+        /* Desktop: reorder elements - transcript first, controls second */
         @media (min-width: 769px) {
+            .main-content {
+                display: flex;
+                flex-direction: column;
+            }
+
+            /* Always show transcript first on desktop */
+            .transcript-card {
+                order: 1;
+                display: block;
+            }
+
+            /* Connection card second */
+            .connection-card {
+                order: 2;
+            }
+
+            /* Inline controls third (hidden by default) */
+            .inline-controls {
+                order: 3;
+            }
+
+            /* Features card last */
+            .features-card {
+                order: 4;
+            }
+
+            /* When has history: hide full card, show inline controls */
             .main-content.has-history .connection-card {
                 display: none;
             }
