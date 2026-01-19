@@ -386,43 +386,38 @@ async def handle_media_stream(websocket: WebSocket):
 
     @realtime_agent.register_realtime_function(  # type: ignore [misc]
         name="web_search",
-        description="Search the web for current information, recent news, or specific topics. Returns search results with titles, snippets, and sources."
+        description="Search the web for current information, recent news, or specific topics using OpenAI's web search. Returns up-to-date results with citations."
     )
     def web_search(query: Annotated[str, "search_query"]) -> str:
         """
-        Search the web using DuckDuckGo search.
-        Security: Validates and sanitizes input query.
+        Search the web using OpenAI's Responses API with web_search tool.
+        Returns current information with sourced citations.
         """
-        from duckduckgo_search import DDGS
-
         try:
             # Validate search query
             validated_query = SearchQuery(query=query)
             safe_query = validated_query.query
 
-            logger.info(f"<-- Executing DuckDuckGo web search for query: {safe_query} -->")
+            logger.info(f"<-- Executing OpenAI web search for query: {safe_query} -->")
 
-            # Perform actual web search using DuckDuckGo
-            with DDGS() as ddgs:
-                results = list(ddgs.text(safe_query, max_results=5))
+            # Use OpenAI's Responses API with web_search_preview tool
+            response = openai_client.responses.create(
+                model="gpt-4o-mini",
+                tools=[{"type": "web_search_preview"}],
+                input=safe_query
+            )
 
-            if not results:
-                logger.warning(f"No search results for: {safe_query}")
-                return "No search results found. Please try a different query."
-
-            # Format results for voice response
-            formatted_results = []
-            for i, result in enumerate(results[:3], 1):  # Top 3 for brevity
-                title = result.get('title', 'No title')
-                body = result.get('body', 'No description')
-                # Truncate body for voice readability
-                if len(body) > 200:
-                    body = body[:200] + "..."
-                formatted_results.append(f"{i}. {title}: {body}")
-
-            response_text = " ".join(formatted_results)
-            logger.info(f"Web search returned {len(results)} results, formatted {len(formatted_results)}")
-            return response_text
+            # Extract the response text
+            if hasattr(response, 'output_text') and response.output_text:
+                result_text = response.output_text
+                # Truncate for voice readability if too long
+                if len(result_text) > 500:
+                    result_text = result_text[:500] + "..."
+                logger.info(f"Web search returned {len(result_text)} characters")
+                return result_text
+            else:
+                logger.warning("No output_text in web search response")
+                return "I couldn't find relevant information. Please try a different query."
 
         except ValidationError as e:
             logger.error(f"Search query validation failed for '{query}': {e}")
