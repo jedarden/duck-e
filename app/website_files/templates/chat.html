@@ -573,9 +573,10 @@
                 flex-shrink: 0; /* Don't shrink controls */
             }
 
-            .main-content.has-history .transcript-card {
+            .main-content.has-history .transcript-card,
+            .main-content.has-history .transcript-card.visible {
                 flex: 1;
-                display: flex;
+                display: flex !important;
                 flex-direction: column;
                 min-height: 0; /* Allow flex children to shrink */
                 border-radius: 20px 20px 0 0;
@@ -588,7 +589,8 @@
                 overflow-y: auto;
                 min-height: 0; /* Critical for scrolling in flex container */
                 border-radius: 12px 12px 0 0; /* Rounded top only */
-                margin-bottom: 0;
+                margin: 0;
+                padding-bottom: 15px; /* Keep some padding at bottom for content */
             }
 
             .main-content.has-history .features-card {
