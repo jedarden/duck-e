@@ -808,9 +808,7 @@
 
         /* Mobile optimizations */
         @media (max-width: 768px) {
-            body {
-                padding-bottom: 200px; /* Space for fixed controls */
-            }
+            /* No extra padding initially - controls not fixed yet */
 
             .container {
                 padding: 10px;
@@ -841,17 +839,29 @@
                 flex-direction: column;
             }
 
-            /* Reorder: transcript first, then features, connection card last (but fixed) */
+            /* Mobile layout: transcript, connection, features (initially) */
             .transcript-card {
                 order: 1;
             }
 
-            .features-card {
+            .connection-card {
                 order: 2;
             }
 
-            .connection-card {
+            .features-card {
                 order: 3;
+            }
+
+            .connection-card:hover {
+                transform: none;
+            }
+
+            /* When has history: connection card fixed at bottom */
+            .main-content.has-history {
+                padding-bottom: 200px; /* Space for fixed controls */
+            }
+
+            .main-content.has-history .connection-card {
                 position: fixed;
                 bottom: 0;
                 left: 0;
@@ -863,10 +873,7 @@
                 margin: 0;
                 box-shadow: 0 -5px 30px var(--shadow);
                 background: var(--bg-secondary);
-            }
-
-            .connection-card:hover {
-                transform: none;
+                order: 99;
             }
 
             .status-container {
