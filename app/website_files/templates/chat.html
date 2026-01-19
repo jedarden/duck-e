@@ -907,8 +907,12 @@
                 font-size: 0.75rem;
             }
 
-            /* Transcript card adjustments - always visible on mobile */
+            /* Transcript card - only show when has .visible class */
             .transcript-card {
+                display: none;
+            }
+
+            .transcript-card.visible {
                 display: block;
             }
 
@@ -917,9 +921,11 @@
                 min-height: 100px;
             }
 
-            /* Features card - more compact */
+            /* Features card - scrollable on mobile */
             .features-card {
                 padding: 15px;
+                max-height: calc(100vh - 350px);
+                overflow-y: auto;
             }
 
             .features-title {
