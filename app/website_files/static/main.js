@@ -3,6 +3,7 @@ let connectionStatus = false; // false means not connected
 let isMuted = false; // Microphone mute state
 let isPushToTalk = false; // Push-to-talk mode
 let transcriptMessages = []; // Store transcript messages
+let streamingResponse = null; // Track current streaming response { index, content, type }
 
 // Configure marked for safe rendering
 if (typeof marked !== 'undefined') {
@@ -224,7 +225,37 @@ const addTranscriptMessage = (role, content) => {
   showTranscript();
 };
 
-const renderTranscript = () => {
+// Start a new streaming response (returns index)
+const startStreamingResponse = (role) => {
+  const index = transcriptMessages.length;
+  transcriptMessages.push({ role, content: '', timestamp: Date.now(), streaming: true });
+  streamingResponse = { index, content: '', role };
+  renderTranscript();
+  showTranscript();
+  return index;
+};
+
+// Append to streaming response
+const appendToStreamingResponse = (delta) => {
+  if (!streamingResponse) return;
+  streamingResponse.content += delta;
+  transcriptMessages[streamingResponse.index].content = streamingResponse.content;
+  renderTranscript(true); // Pass true to indicate streaming update
+};
+
+// Finalize streaming response
+const finalizeStreamingResponse = (finalContent) => {
+  if (!streamingResponse) return;
+  // Use final content if provided, otherwise keep accumulated content
+  if (finalContent) {
+    transcriptMessages[streamingResponse.index].content = finalContent;
+  }
+  transcriptMessages[streamingResponse.index].streaming = false;
+  streamingResponse = null;
+  renderTranscript();
+};
+
+const renderTranscript = (isStreamingUpdate = false) => {
   const container = document.getElementById('transcript-content');
   if (!container) return;
 
@@ -233,25 +264,31 @@ const renderTranscript = () => {
     return;
   }
 
-  const html = transcriptMessages.map(msg => {
+  const html = transcriptMessages.map((msg, idx) => {
     const roleClass = msg.role === 'user' ? 'user' : 'assistant';
     const roleLabel = msg.role === 'user' ? 'You' : 'DUCK-E';
+    const streamingClass = msg.streaming ? ' streaming' : '';
 
-    // Parse markdown if marked is available
-    let contentHtml = msg.content;
-    if (typeof marked !== 'undefined') {
+    // Parse markdown if marked is available (skip for empty streaming)
+    let contentHtml = msg.content || '';
+    if (contentHtml && typeof marked !== 'undefined') {
       try {
         contentHtml = marked.parse(msg.content);
       } catch (e) {
         console.warn('Markdown parsing failed:', e);
         contentHtml = msg.content.replace(/\n/g, '<br>');
       }
-    } else {
+    } else if (contentHtml) {
       contentHtml = msg.content.replace(/\n/g, '<br>');
     }
 
+    // Show cursor for streaming messages
+    if (msg.streaming) {
+      contentHtml += '<span class="streaming-cursor">▋</span>';
+    }
+
     return `
-      <div class="transcript-message ${roleClass}">
+      <div class="transcript-message ${roleClass}${streamingClass}" data-idx="${idx}">
         <div class="transcript-label">${roleLabel}</div>
         <div class="transcript-text">${contentHtml}</div>
       </div>
@@ -283,18 +320,54 @@ const handleWebRTCMessage = (event) => {
         addTranscriptMessage('user', data.transcript);
       }
     }
+    // Assistant's audio response transcript DELTA (streaming)
+    else if (data.type === 'response.audio_transcript.delta') {
+      if (data.delta) {
+        // Start streaming if not already
+        if (!streamingResponse || streamingResponse.type !== 'audio_transcript') {
+          startStreamingResponse('assistant');
+          if (streamingResponse) streamingResponse.type = 'audio_transcript';
+        }
+        appendToStreamingResponse(data.delta);
+      }
+    }
     // Assistant's audio response transcript completed
     else if (data.type === 'response.audio_transcript.done') {
-      if (data.transcript) {
+      if (streamingResponse && streamingResponse.type === 'audio_transcript') {
+        // Finalize with the complete transcript
+        finalizeStreamingResponse(data.transcript);
+      } else if (data.transcript) {
+        // No streaming was happening, add as complete message
         console.log('Assistant transcript:', data.transcript);
         addTranscriptMessage('assistant', data.transcript);
       }
     }
+    // Assistant's text response DELTA (streaming)
+    else if (data.type === 'response.text.delta') {
+      if (data.delta) {
+        // Start streaming if not already
+        if (!streamingResponse || streamingResponse.type !== 'text') {
+          startStreamingResponse('assistant');
+          if (streamingResponse) streamingResponse.type = 'text';
+        }
+        appendToStreamingResponse(data.delta);
+      }
+    }
     // Assistant's text response completed (for non-audio responses)
     else if (data.type === 'response.text.done') {
-      if (data.text) {
+      if (streamingResponse && streamingResponse.type === 'text') {
+        // Finalize with the complete text
+        finalizeStreamingResponse(data.text);
+      } else if (data.text) {
+        // No streaming was happening, add as complete message
         console.log('Assistant text:', data.text);
         addTranscriptMessage('assistant', data.text);
+      }
+    }
+    // Response cancelled or interrupted - finalize any streaming
+    else if (data.type === 'response.cancelled' || data.type === 'response.done') {
+      if (streamingResponse) {
+        finalizeStreamingResponse();
       }
     }
     // Custom transcript message from backend

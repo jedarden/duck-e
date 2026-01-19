@@ -628,6 +628,24 @@
             font-style: italic;
         }
 
+        /* Streaming cursor animation */
+        .streaming-cursor {
+            display: inline-block;
+            animation: blink 1s step-end infinite;
+            color: var(--primary-light);
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        .transcript-message.streaming .transcript-text {
+            border-left: 2px solid var(--primary-light);
+            padding-left: 10px;
+        }
+
         /* Markdown styles in transcript */
         .transcript-content code {
             background: var(--bg-tertiary);
