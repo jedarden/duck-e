@@ -225,32 +225,42 @@ const renderTranscript = () => {
 // Handle incoming messages from WebRTC for transcript
 const handleWebRTCMessage = (event) => {
   try {
-    const data = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+    // event now has { data: string, message: object } from our modified ag2client
+    const data = event.message || (typeof event.data === 'string' ? JSON.parse(event.data) : event.data);
+
+    // Log message types for debugging (can be removed later)
+    if (data.type) {
+      console.log('WebRTC message type:', data.type);
+    }
 
     // Handle different message types from OpenAI Realtime API
-    if (data.type === 'response.audio_transcript.done' ||
-        data.type === 'conversation.item.input_audio_transcription.completed') {
-      // User's speech transcription
+    // User's speech transcription completed
+    if (data.type === 'conversation.item.input_audio_transcription.completed') {
       if (data.transcript) {
+        console.log('User transcript:', data.transcript);
         addTranscriptMessage('user', data.transcript);
       }
-    } else if (data.type === 'response.text.done' ||
-               data.type === 'response.audio_transcript.delta') {
-      // Assistant's response
-      if (data.text || data.delta) {
-        const text = data.text || data.delta;
-        // For delta messages, we might want to accumulate them
-        // For now, just add complete messages
-        if (data.type === 'response.text.done' && text) {
-          addTranscriptMessage('assistant', text);
-        }
+    }
+    // Assistant's audio response transcript completed
+    else if (data.type === 'response.audio_transcript.done') {
+      if (data.transcript) {
+        console.log('Assistant transcript:', data.transcript);
+        addTranscriptMessage('assistant', data.transcript);
       }
-    } else if (data.type === 'transcript') {
-      // Custom transcript message from backend
+    }
+    // Assistant's text response completed (for non-audio responses)
+    else if (data.type === 'response.text.done') {
+      if (data.text) {
+        console.log('Assistant text:', data.text);
+        addTranscriptMessage('assistant', data.text);
+      }
+    }
+    // Custom transcript message from backend
+    else if (data.type === 'transcript') {
       addTranscriptMessage(data.role || 'assistant', data.content);
     }
   } catch (e) {
-    // Not a JSON message or parsing error, ignore
+    console.error('Error handling WebRTC message:', e);
   }
 };
 

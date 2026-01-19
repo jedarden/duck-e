@@ -227,6 +227,7 @@ var ag2client = (() => {
     ws;
     pc;
     onDisconnect;
+    onMessage;
     constructor(ag2SocketUrl, microphone) {
       this.ag2SocketUrl = ag2SocketUrl;
       this.microphone = microphone;
@@ -235,6 +236,7 @@ var ag2client = (() => {
       this.onDisconnect = () => {
         console.log("WebRTC disconnected");
       };
+      this.onMessage = null;
     }
     async close() {
       if (this.microphone) {
@@ -288,6 +290,14 @@ var ag2client = (() => {
           } catch (error) {
             console.error("Error parsing message", e.data, error);
             return;
+          }
+          // Forward all messages to onMessage callback for transcript handling
+          if (webRTC.onMessage) {
+            try {
+              webRTC.onMessage({ data: e.data, message: message });
+            } catch (callbackError) {
+              console.error("Error in onMessage callback", callbackError);
+            }
           }
           if (message.type && message.type.includes("function")) {
             console.log("WebRTC function message", message);
