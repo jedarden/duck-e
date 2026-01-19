@@ -132,8 +132,7 @@ app.add_middleware(security_middleware)
 
 # Add cost protection middleware
 # Reads from COST_PROTECTION_* environment variables
-cost_protection_middleware = CostProtectionMiddleware(app)
-app.add_middleware(lambda app: cost_protection_middleware)
+app.add_middleware(CostProtectionMiddleware)
 
 # Initialize WebSocket security validator
 ws_security = get_websocket_security_middleware()
