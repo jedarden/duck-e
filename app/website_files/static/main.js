@@ -54,8 +54,13 @@ const updateMuteUI = (muted) => {
 
 // Update push-to-talk button UI
 const updatePTTUI = (enabled) => {
+  console.log('updatePTTUI called with enabled:', enabled);
   const pttToggle = document.getElementById('ptt-toggle');
   const pttBtn = document.getElementById('ptt-btn');
+  const pttHint = document.querySelector('.ptt-hint');
+
+  console.log('pttToggle element:', pttToggle);
+  console.log('pttBtn element:', pttBtn);
 
   if (pttToggle) {
     pttToggle.checked = enabled;
@@ -64,9 +69,20 @@ const updatePTTUI = (enabled) => {
   if (pttBtn) {
     if (enabled) {
       pttBtn.classList.remove('hidden');
+      pttBtn.style.display = 'flex'; // Force display
+      console.log('PTT button shown');
     } else {
       pttBtn.classList.add('hidden');
+      pttBtn.style.display = 'none';
+      console.log('PTT button hidden');
     }
+  } else {
+    console.error('ptt-btn element not found!');
+  }
+
+  // Show/hide the hint
+  if (pttHint) {
+    pttHint.style.display = enabled ? 'block' : 'none';
   }
 };
 
