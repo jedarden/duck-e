@@ -305,6 +305,51 @@
             box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
         }
 
+        /* Audio controls */
+        .audio-controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .audio-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            padding: 12px 24px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .audio-btn:hover {
+            background: var(--bg-primary);
+            border-color: var(--primary);
+            color: var(--text-primary);
+        }
+
+        .audio-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .audio-btn.muted {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .audio-btn .icon {
+            font-size: 1.2rem;
+        }
+
         /* Features card */
         .features-card {
             background: var(--bg-secondary);
@@ -510,6 +555,14 @@
                 <button id="toggle-connection">
                     <span id="button-text">Connect</span>
                 </button>
+
+                <!-- Audio controls -->
+                <div class="audio-controls">
+                    <button id="mute-btn" class="audio-btn" disabled>
+                        <span class="icon" id="mute-icon">🔊</span>
+                        <span id="mute-text">Mute</span>
+                    </button>
+                </div>
             </div>
 
             <!-- Features card -->

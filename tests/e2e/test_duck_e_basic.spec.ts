@@ -1,0 +1,54 @@
+import { test, expect } from '@playwright/test';
+
+test.describe('DUCK-E Basic Tests', () => {
+  const baseUrl = process.env.BASE_URL || 'http://duck-e-test.ducke.svc.cluster.local:8000';
+
+  test('homepage loads correctly', async ({ page }) => {
+    await page.goto(baseUrl);
+    
+    // Check page title
+    await expect(page).toHaveTitle(/DUCK-E/);
+    
+    // Check main elements exist
+    await expect(page.locator('body')).toBeVisible();
+  });
+
+  test('connect button is present', async ({ page }) => {
+    await page.goto(baseUrl);
+    
+    // Look for connect button
+    const connectButton = page.locator('#connect-button, button:has-text("Connect"), [data-testid="connect"]');
+    await expect(connectButton.first()).toBeVisible({ timeout: 10000 });
+  });
+
+  test('status endpoint returns healthy', async ({ request }) => {
+    const response = await request.get(`${baseUrl}/status`);
+    expect(response.ok()).toBeTruthy();
+    
+    const json = await response.json();
+    expect(json.message).toContain('running');
+  });
+});
+
+test.describe('Audio Mute Feature', () => {
+  const baseUrl = process.env.BASE_URL || 'http://duck-e-test.ducke.svc.cluster.local:8000';
+
+  test('mute button is present and initially disabled', async ({ page }) => {
+    await page.goto(baseUrl);
+    
+    const muteBtn = page.locator('#mute-btn');
+    await expect(muteBtn).toBeVisible();
+    await expect(muteBtn).toBeDisabled();
+  });
+
+  test('mute button shows correct initial state', async ({ page }) => {
+    await page.goto(baseUrl);
+    
+    const muteIcon = page.locator('#mute-icon');
+    const muteText = page.locator('#mute-text');
+    
+    // Should show unmuted state by default
+    await expect(muteIcon).toHaveText('🔊');
+    await expect(muteText).toHaveText('Mute');
+  });
+});
