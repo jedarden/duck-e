@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from logging import getLogger
+import openai
 from openai import OpenAI
 from pathlib import Path
 from typing import Annotated
@@ -106,8 +107,8 @@ swarm_llm_config = {
 
 openai_client = OpenAI(
     api_key=os.getenv('OPENAI_API_KEY'),
-    timeout=60.0,  # 60 second timeout for API calls
-    max_retries=2  # Retry twice on failure
+    timeout=120.0,  # 120 second timeout for API calls (web searches can be slow)
+    max_retries=3  # Retry 3 times on transient failures
 )
 
 # Initialize FastAPI application
@@ -446,8 +447,15 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
                 # Check if tool was called
                 if hasattr(message, 'tool_calls') and message.tool_calls:
                     logger.info(f"Web search tool called: {len(message.tool_calls)} call(s)")
-                    # Return the assistant's response after tool use
-                    return message.content if message.content else "Search completed. Please ask me about the results."
+                    # When tool is called, content may be empty - the model expects tool results
+                    # Since we're using this as a one-shot search, return what we have or indicate search happened
+                    if message.content:
+                        return message.content
+                    else:
+                        # Log the tool call details for debugging
+                        for tc in message.tool_calls:
+                            logger.info(f"Tool call: {tc.function.name} with args: {tc.function.arguments}")
+                        return "I found some information but couldn't format the results. Please try asking your question differently."
 
                 # Regular response without tool call
                 if message.content:
@@ -463,9 +471,21 @@ async def handle_media_stream(websocket: WebSocket, request: Request):
         except ValidationError as e:
             logger.error(f"Search query validation failed for '{query}': {e}")
             return "Invalid search query. Please rephrase your question."
+        except openai.RateLimitError as e:
+            logger.warning(f"Web search rate limited: {e}")
+            return "Search service is currently busy. Please try again in a moment."
+        except openai.APITimeoutError as e:
+            logger.warning(f"Web search timed out: {e}")
+            return "Search took too long to respond. Please try a more specific query."
+        except openai.APIConnectionError as e:
+            logger.error(f"Web search connection error: {e}")
+            return "Unable to connect to search service. Please check your internet connection."
+        except openai.AuthenticationError as e:
+            logger.error(f"Web search authentication error: {e}")
+            return "Search service authentication failed. Please contact support."
         except Exception as e:
             logger.error(f"Web search error: {str(e)}", exc_info=True)
-            return "I'm having trouble searching the web right now. I can help with general questions or information about our business clients."
+            return "I'm having trouble searching the web right now. Please try again."
 
     try:
         await realtime_agent.run()
