@@ -350,6 +350,104 @@
             font-size: 1.2rem;
         }
 
+        /* Push-to-talk controls */
+        .ptt-controls {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+        }
+
+        .ptt-controls.disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        .ptt-toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .ptt-toggle-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .ptt-toggle {
+            position: relative;
+            width: 50px;
+            height: 26px;
+            appearance: none;
+            background: var(--bg-tertiary);
+            border-radius: 13px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .ptt-toggle:checked {
+            background: var(--primary);
+        }
+
+        .ptt-toggle::before {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s ease;
+        }
+
+        .ptt-toggle:checked::before {
+            transform: translateX(24px);
+        }
+
+        .ptt-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            width: 100%;
+            max-width: 300px;
+            padding: 20px 30px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            border: 2px solid var(--primary);
+            border-radius: 15px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            user-select: none;
+        }
+
+        .ptt-btn.hidden {
+            display: none;
+        }
+
+        .ptt-btn:hover {
+            background: var(--bg-primary);
+        }
+
+        .ptt-btn:active,
+        .ptt-btn.active {
+            background: var(--primary);
+            color: white;
+            transform: scale(0.98);
+            box-shadow: 0 0 20px rgba(79, 70, 229, 0.5);
+        }
+
+        .ptt-hint {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
         /* Transcript display */
         .transcript-card {
             background: var(--bg-secondary);
@@ -718,6 +816,19 @@
                         <span class="icon" id="mute-icon">🔊</span>
                         <span id="mute-text">Mute</span>
                     </button>
+                </div>
+
+                <!-- Push-to-talk controls -->
+                <div id="ptt-controls" class="ptt-controls disabled">
+                    <div class="ptt-toggle-container">
+                        <span class="ptt-toggle-label">Push-to-Talk Mode</span>
+                        <input type="checkbox" id="ptt-toggle" class="ptt-toggle">
+                    </div>
+                    <button id="ptt-btn" class="ptt-btn hidden">
+                        <span>🎤</span>
+                        <span>Hold to Talk</span>
+                    </button>
+                    <span class="ptt-hint">Or press and hold Spacebar</span>
                 </div>
             </div>
 

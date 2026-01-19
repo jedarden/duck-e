@@ -1,6 +1,7 @@
 let webRTC; // Global variable for our WebRTC instance.
 let connectionStatus = false; // false means not connected
-let isMuted = false; // Audio mute state
+let isMuted = false; // Microphone mute state
+let isPushToTalk = false; // Push-to-talk mode
 let transcriptMessages = []; // Store transcript messages
 
 // Configure marked for safe rendering
@@ -23,6 +24,17 @@ const saveMuteState = (muted) => {
   localStorage.setItem('duck-e-muted', muted.toString());
 };
 
+// Load push-to-talk state from localStorage
+const loadPushToTalkState = () => {
+  const saved = localStorage.getItem('duck-e-ptt');
+  return saved === 'true';
+};
+
+// Save push-to-talk state to localStorage
+const savePushToTalkState = (enabled) => {
+  localStorage.setItem('duck-e-ptt', enabled.toString());
+};
+
 // Update mute button UI
 const updateMuteUI = (muted) => {
   const muteBtn = document.getElementById('mute-btn');
@@ -40,30 +52,89 @@ const updateMuteUI = (muted) => {
   }
 };
 
+// Update push-to-talk button UI
+const updatePTTUI = (enabled) => {
+  const pttToggle = document.getElementById('ptt-toggle');
+  const pttBtn = document.getElementById('ptt-btn');
+
+  if (pttToggle) {
+    pttToggle.checked = enabled;
+  }
+
+  if (pttBtn) {
+    if (enabled) {
+      pttBtn.classList.remove('hidden');
+    } else {
+      pttBtn.classList.add('hidden');
+    }
+  }
+};
+
+// Set microphone enabled state
+const setMicrophoneEnabled = (enabled) => {
+  if (webRTC && webRTC.microphone) {
+    webRTC.microphone.enabled = enabled;
+    console.log(`Microphone ${enabled ? 'enabled' : 'disabled'}`);
+  }
+};
+
 // Toggle mute state
-const toggleMute = async () => {
-  if (!webRTC || !webRTC.audioContext) {
-    console.warn('No active audio context to mute');
+const toggleMute = () => {
+  if (!webRTC || !webRTC.microphone) {
+    console.warn('No active microphone to mute');
     return;
   }
 
-  try {
-    if (isMuted) {
-      // Unmute - resume audio context
-      await webRTC.audioContext.resume();
-      isMuted = false;
-    } else {
-      // Mute - suspend audio context
-      await webRTC.audioContext.suspend();
-      isMuted = true;
-    }
+  isMuted = !isMuted;
 
-    updateMuteUI(isMuted);
-    saveMuteState(isMuted);
-    console.log(`Audio ${isMuted ? 'muted' : 'unmuted'}`);
-  } catch (error) {
-    console.error('Error toggling mute:', error);
+  // In push-to-talk mode, mute affects the base state
+  if (!isPushToTalk) {
+    setMicrophoneEnabled(!isMuted);
   }
+
+  updateMuteUI(isMuted);
+  saveMuteState(isMuted);
+  console.log(`Audio ${isMuted ? 'muted' : 'unmuted'}`);
+};
+
+// Toggle push-to-talk mode
+const togglePushToTalk = () => {
+  isPushToTalk = !isPushToTalk;
+
+  if (isPushToTalk) {
+    // Entering PTT mode - disable mic by default
+    setMicrophoneEnabled(false);
+  } else {
+    // Leaving PTT mode - restore based on mute state
+    setMicrophoneEnabled(!isMuted);
+  }
+
+  updatePTTUI(isPushToTalk);
+  savePushToTalkState(isPushToTalk);
+  console.log(`Push-to-talk mode ${isPushToTalk ? 'enabled' : 'disabled'}`);
+};
+
+// Push-to-talk button handlers
+const startTalking = () => {
+  if (!isPushToTalk || !webRTC || !webRTC.microphone) return;
+
+  const pttBtn = document.getElementById('ptt-btn');
+  if (pttBtn) {
+    pttBtn.classList.add('active');
+  }
+  setMicrophoneEnabled(true);
+  console.log('PTT: Started talking');
+};
+
+const stopTalking = () => {
+  if (!isPushToTalk || !webRTC || !webRTC.microphone) return;
+
+  const pttBtn = document.getElementById('ptt-btn');
+  if (pttBtn) {
+    pttBtn.classList.remove('active');
+  }
+  setMicrophoneEnabled(false);
+  console.log('PTT: Stopped talking');
 };
 
 // Transcript display functions
@@ -167,6 +238,7 @@ const updateUI = (status) => {
   const buttonText = document.getElementById("button-text");
   const toggleButton = document.getElementById("toggle-connection");
   const muteBtn = document.getElementById("mute-btn");
+  const pttControls = document.getElementById("ptt-controls");
 
   // Remove all status classes
   statusIndicator.classList.remove("connecting", "connected", "disconnected");
@@ -178,6 +250,7 @@ const updateUI = (status) => {
     buttonText.innerHTML = '<span class="spinner"></span>';
     toggleButton.disabled = true;
     muteBtn.disabled = true;
+    if (pttControls) pttControls.classList.add('disabled');
   } else if (status === "connected") {
     statusIndicator.classList.add("connected");
     statusText.textContent = "Connected - DUCK-E is listening";
@@ -185,12 +258,14 @@ const updateUI = (status) => {
     toggleButton.classList.add("connected");
     toggleButton.disabled = false;
     muteBtn.disabled = false;
+    if (pttControls) pttControls.classList.remove('disabled');
   } else if (status === "disconnected") {
     statusIndicator.classList.add("disconnected");
     statusText.textContent = "Ready to Connect";
     buttonText.textContent = "Connect";
     toggleButton.disabled = false;
     muteBtn.disabled = true;
+    if (pttControls) pttControls.classList.add('disabled');
     // Reset mute state on disconnect
     isMuted = false;
     updateMuteUI(false);
@@ -220,17 +295,22 @@ const toggleConnection = async () => {
       updateUI("connected");
       connectionStatus = true;
 
-      // Apply saved mute state after connection
-      if (isMuted && webRTC.audioContext) {
-        await webRTC.audioContext.suspend();
-        console.log('Applied saved mute state');
+      // Apply saved states after connection
+      if (isPushToTalk) {
+        // In PTT mode, mic is off by default
+        setMicrophoneEnabled(false);
+      } else if (isMuted) {
+        // Apply saved mute state
+        setMicrophoneEnabled(false);
       }
+
+      console.log('Connection established, mic state applied');
     } catch (error) {
       console.error("Connection error:", error);
       updateUI("disconnected");
       connectionStatus = false;
 
-      // Show error notification (you could enhance this with a toast/notification)
+      // Show error notification
       alert("Failed to connect to DUCK-E. Please check your microphone permissions and try again.");
     }
   } else {
@@ -252,6 +332,47 @@ document.addEventListener("DOMContentLoaded", () => {
   const muteBtn = document.getElementById("mute-btn");
   muteBtn.addEventListener("click", toggleMute);
 
+  // Attach push-to-talk toggle listener
+  const pttToggle = document.getElementById("ptt-toggle");
+  if (pttToggle) {
+    pttToggle.addEventListener("change", togglePushToTalk);
+  }
+
+  // Attach push-to-talk button listeners (mouse and touch)
+  const pttBtn = document.getElementById("ptt-btn");
+  if (pttBtn) {
+    // Mouse events
+    pttBtn.addEventListener("mousedown", startTalking);
+    pttBtn.addEventListener("mouseup", stopTalking);
+    pttBtn.addEventListener("mouseleave", stopTalking);
+
+    // Touch events for mobile
+    pttBtn.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      startTalking();
+    });
+    pttBtn.addEventListener("touchend", (e) => {
+      e.preventDefault();
+      stopTalking();
+    });
+    pttBtn.addEventListener("touchcancel", stopTalking);
+  }
+
+  // Keyboard shortcut for PTT (spacebar when in PTT mode)
+  document.addEventListener("keydown", (e) => {
+    if (isPushToTalk && e.code === "Space" && !e.repeat && connectionStatus) {
+      e.preventDefault();
+      startTalking();
+    }
+  });
+
+  document.addEventListener("keyup", (e) => {
+    if (isPushToTalk && e.code === "Space" && connectionStatus) {
+      e.preventDefault();
+      stopTalking();
+    }
+  });
+
   // Attach clear transcript button listener
   const clearBtn = document.getElementById("clear-transcript");
   if (clearBtn) {
@@ -261,9 +382,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Load saved mute preference (will be applied when connected)
+  // Load saved preferences
   isMuted = loadMuteState();
+  isPushToTalk = loadPushToTalkState();
+
   updateMuteUI(isMuted);
+  updatePTTUI(isPushToTalk);
 
   // Initialize UI
   updateUI("disconnected");
