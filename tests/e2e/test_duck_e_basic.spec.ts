@@ -52,3 +52,41 @@ test.describe('Audio Mute Feature', () => {
     await expect(muteText).toHaveText('Mute');
   });
 });
+
+test.describe('Text Transcript Feature', () => {
+  const baseUrl = process.env.BASE_URL || 'http://duck-e-test.ducke.svc.cluster.local:8000';
+
+  test('transcript card exists but is hidden initially', async ({ page }) => {
+    await page.goto(baseUrl);
+    
+    const transcriptCard = page.locator('#transcript-card');
+    await expect(transcriptCard).toBeAttached();
+    await expect(transcriptCard).not.toHaveClass(/visible/);
+  });
+
+  test('clear transcript button exists', async ({ page }) => {
+    await page.goto(baseUrl);
+    
+    const clearBtn = page.locator('#clear-transcript');
+    await expect(clearBtn).toBeAttached();
+    await expect(clearBtn).toHaveText('Clear');
+  });
+
+  test('transcript content container exists', async ({ page }) => {
+    await page.goto(baseUrl);
+    
+    const transcriptContent = page.locator('#transcript-content');
+    await expect(transcriptContent).toBeAttached();
+    await expect(transcriptContent).toContainText('Conversation transcript will appear here');
+  });
+
+  test('marked.js library is loaded', async ({ page }) => {
+    await page.goto(baseUrl);
+    
+    // Check that marked is available in the window
+    const markedLoaded = await page.evaluate(() => {
+      return typeof (window as any).marked !== 'undefined';
+    });
+    expect(markedLoaded).toBe(true);
+  });
+});

@@ -350,6 +350,160 @@
             font-size: 1.2rem;
         }
 
+        /* Transcript display */
+        .transcript-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 40px var(--shadow);
+            display: none;
+        }
+
+        .transcript-card.visible {
+            display: block;
+        }
+
+        .transcript-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .transcript-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .clear-transcript-btn {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .clear-transcript-btn:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .transcript-content {
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 15px;
+            background: var(--bg-primary);
+            border-radius: 12px;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .transcript-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .transcript-content::-webkit-scrollbar-track {
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+        }
+
+        .transcript-content::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 3px;
+        }
+
+        .transcript-message {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .transcript-message:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .transcript-message.user {
+            color: var(--primary-light);
+        }
+
+        .transcript-message.assistant {
+            color: var(--text-secondary);
+        }
+
+        .transcript-label {
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+            opacity: 0.7;
+        }
+
+        .transcript-empty {
+            color: var(--text-muted);
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+        }
+
+        /* Markdown styles in transcript */
+        .transcript-content code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9em;
+        }
+
+        .transcript-content pre {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+
+        .transcript-content pre code {
+            background: none;
+            padding: 0;
+        }
+
+        .transcript-content ul, .transcript-content ol {
+            padding-left: 20px;
+            margin: 10px 0;
+        }
+
+        .transcript-content li {
+            margin: 5px 0;
+        }
+
+        .transcript-content a {
+            color: var(--primary-light);
+            text-decoration: none;
+        }
+
+        .transcript-content a:hover {
+            text-decoration: underline;
+        }
+
+        .transcript-content blockquote {
+            border-left: 3px solid var(--primary);
+            padding-left: 12px;
+            margin: 10px 0;
+            color: var(--text-muted);
+        }
+
         /* Features card */
         .features-card {
             background: var(--bg-secondary);
@@ -520,6 +674,8 @@
         const socketUrl = `${protocol}://${window.location.host}/session`;
     </script>
     <script src="https://github.com/ag2ai/ag2-js-client/releases/download/v0.3.1/index.global.js"></script>
+    <!-- Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="/static/main.js" type="module" defer></script>
 </head>
 <body>
@@ -562,6 +718,20 @@
                         <span class="icon" id="mute-icon">🔊</span>
                         <span id="mute-text">Mute</span>
                     </button>
+                </div>
+            </div>
+
+            <!-- Transcript card -->
+            <div id="transcript-card" class="transcript-card">
+                <div class="transcript-header">
+                    <div class="transcript-title">
+                        <span>📝</span>
+                        <span>Conversation</span>
+                    </div>
+                    <button id="clear-transcript" class="clear-transcript-btn">Clear</button>
+                </div>
+                <div id="transcript-content" class="transcript-content">
+                    <div class="transcript-empty">Conversation transcript will appear here...</div>
                 </div>
             </div>
 
