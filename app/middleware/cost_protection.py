@@ -10,9 +10,16 @@ from collections import defaultdict
 import asyncio
 import logging
 from pydantic import BaseModel, Field
-import redis.asyncio as redis
 import json
 import os
+
+# Optional redis import - only needed if REDIS_URL is configured
+try:
+    import redis.asyncio as redis
+    REDIS_AVAILABLE = True
+except ImportError:
+    redis = None
+    REDIS_AVAILABLE = False
 from prometheus_client import Counter, Gauge, Histogram
 
 logger = logging.getLogger(__name__)
@@ -362,7 +369,7 @@ def get_cost_tracker() -> SessionCostTracker:
         config = get_cost_config()
         redis_client = None
 
-        if config.redis_url:
+        if config.redis_url and REDIS_AVAILABLE:
             try:
                 redis_client = redis.from_url(
                     config.redis_url,
@@ -374,6 +381,8 @@ def get_cost_tracker() -> SessionCostTracker:
                 logger.info("Cost tracker using Redis for distributed tracking")
             except Exception as e:
                 logger.error(f"Failed to initialize Redis for cost tracking: {e}")
+        elif config.redis_url and not REDIS_AVAILABLE:
+            logger.warning("REDIS_URL configured but redis package not installed, using in-memory storage")
 
         _cost_tracker = SessionCostTracker(redis_client)
 
