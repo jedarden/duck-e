@@ -273,7 +273,7 @@ async def handle_media_stream(websocket: WebSocket):
 
         realtime_agent = RealtimeAgent(
             name="DUCK-E",
-            system_message=f"You are an AI voice assistant named DUCK-E (pronounced ducky). You can answer questions about weather (make sure to localize units based on the location), or search the web for current information. \n\nUse the web_search_preview tool for recent news, current events, or information beyond your knowledge fall back to the web_search tool if needed. The tool will automatically acknowledge the request and provide search results. Keep responses brief, two short sentences maximum. If conducting a web search, explain what is being searched. The user's browser is configured for this language <language>{safe_language}</language>",
+            system_message=f"You are an AI voice assistant named DUCK-E (pronounced ducky). You can answer questions about weather (make sure to localize units based on the location), or search the web for current information. \n\nIMPORTANT: Before calling web_search, you MUST first speak to the user saying something like 'Let me search for that' or 'Searching the web for [topic]'. Only after announcing the search should you call the web_search function. Keep responses brief, two short sentences maximum. The user's browser is configured for this language <language>{safe_language}</language>",
             llm_config=realtime_llm_config,
             websocket=websocket,
             logger=logger,
