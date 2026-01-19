@@ -175,11 +175,12 @@ async def start_chat(request: Request):
 
 
 @app.websocket("/session")
-@limiter.limit(rate_limit_config.websocket_limit)
-async def handle_media_stream(websocket: WebSocket, request: Request):
+async def handle_media_stream(websocket: WebSocket):
     """
-    WebSocket endpoint with rate limiting
-    Rate limit: 5 connections per minute per IP
+    WebSocket endpoint for real-time audio streaming.
+
+    Note: Rate limiting via slowapi is not supported for WebSocket endpoints.
+    Connection limits are enforced via the CostProtectionMiddleware instead.
 
     Handles real-time audio streaming with OpenAI's Realtime API
     """
