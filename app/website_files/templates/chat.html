@@ -527,13 +527,12 @@
                 flex-direction: column;
             }
 
-            /* Always show transcript first on desktop */
+            /* Transcript first when visible (hidden by default until content) */
             .transcript-card {
                 order: 1;
-                display: block;
             }
 
-            /* Connection card second */
+            /* Connection card second - hero when no transcript */
             .connection-card {
                 order: 2;
             }
