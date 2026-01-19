@@ -5,6 +5,64 @@ All notable changes to DUCK-E will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.25] - 2026-01-19
+
+### ✨ UI/UX Improvements - Conversation Experience Release
+
+This release focuses on improving the conversation experience with streaming responses, mobile-friendly layout, and better version visibility.
+
+### Added
+
+#### User Transcription Display
+- **User speech transcription** now appears in conversation transcript
+- Enabled `input_audio_transcription` via session.update with Whisper model
+- Frontend already handled the events, backend now sends them
+
+#### Streaming Text Responses
+- **Real-time streaming** of assistant responses as they're generated
+- Handles `response.audio_transcript.delta` and `response.text.delta` events
+- Blinking cursor (`▋`) indicates active streaming
+- Left border visual indicator on streaming messages
+- Smooth finalization when `.done` event arrives
+
+#### Version Display
+- **Footer badge** shows current version (e.g., `v0.2.25`)
+- **Console log** displays styled version on page load
+- **`/status` endpoint** returns dynamic version from VERSION file
+- VERSION file injected at Docker build time
+
+#### Desktop Inline Controls
+- **Condensed controls bar** appears beneath transcript when conversation exists
+- Status indicator, connect/disconnect, mute, and PTT in single row
+- Full connection card hidden when chat history present
+- Synced state between main and inline controls
+
+### Changed
+
+#### Desktop Layout
+- **Transcript card** now appears above connection controls (flex order)
+- **Connection card** hero'd when no conversation (transcript hidden)
+- **Clear button** returns to hero connect state
+
+#### Mobile Layout
+- **Transcript at top** of screen
+- **Controls fixed to bottom** for thumb accessibility
+- **iOS safe area** support with `viewport-fit=cover`
+- **Compact header** and controls on small screens
+
+#### Build Process
+- **VERSION file** read at runtime from `/app/VERSION`
+- **Dockerfile** copies VERSION into container
+- Version logged at server startup
+
+### Fixed
+
+- Desktop layout order (transcript above controls)
+- Transcript visibility (hidden until content exists)
+- Mobile layout (controls at bottom, not blocking content)
+
+---
+
 ## [0.2.0] - 2025-10-10
 
 ### 🔒 Security - Major Hardening Release
