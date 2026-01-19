@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>DUCK-E - Voice Assistant</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <style>
@@ -691,39 +691,186 @@
 
         /* Mobile optimizations */
         @media (max-width: 768px) {
+            body {
+                padding-bottom: 200px; /* Space for fixed controls */
+            }
+
             .container {
-                padding: 15px;
+                padding: 10px;
+                padding-bottom: 0;
             }
 
             .header {
-                padding: 20px 0;
-                gap: 15px;
+                padding: 10px 0;
+                gap: 10px;
             }
 
             .logo {
-                width: 60px;
-                height: 60px;
+                width: 50px;
+                height: 50px;
             }
 
-            .connection-card {
-                padding: 30px 20px;
+            h1 {
+                font-size: 1.5rem;
             }
 
-            #toggle-connection {
-                padding: 14px 36px;
-                font-size: 1rem;
+            .subtitle {
+                font-size: 0.8rem;
+            }
+
+            .main-content {
+                gap: 15px;
+                display: flex;
+                flex-direction: column;
+            }
+
+            /* Reorder: transcript first, then features, connection card last (but fixed) */
+            .transcript-card {
+                order: 1;
             }
 
             .features-card {
-                padding: 20px;
+                order: 2;
+            }
+
+            .connection-card {
+                order: 3;
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                z-index: 100;
+                border-radius: 20px 20px 0 0;
+                padding: 15px;
+                padding-bottom: calc(15px + env(safe-area-inset-bottom, 0px));
+                margin: 0;
+                box-shadow: 0 -5px 30px var(--shadow);
+                background: var(--bg-secondary);
+            }
+
+            .connection-card:hover {
+                transform: none;
+            }
+
+            .status-container {
+                margin-bottom: 12px;
+                min-height: auto;
+            }
+
+            .status-text {
+                font-size: 0.95rem;
+            }
+
+            #toggle-connection {
+                padding: 12px 30px;
+                font-size: 0.95rem;
+            }
+
+            .audio-controls {
+                margin-top: 12px;
+            }
+
+            .audio-btn {
+                padding: 10px 18px;
+                font-size: 0.85rem;
+            }
+
+            .ptt-controls {
+                margin-top: 12px;
+                padding-top: 12px;
+                gap: 10px;
+            }
+
+            .ptt-btn {
+                padding: 14px 20px;
+                font-size: 1rem;
+            }
+
+            .ptt-hint {
+                font-size: 0.75rem;
+            }
+
+            /* Transcript card adjustments - always visible on mobile */
+            .transcript-card {
+                display: block;
+            }
+
+            .transcript-content {
+                max-height: 40vh;
+                min-height: 100px;
+            }
+
+            /* Features card - more compact */
+            .features-card {
+                padding: 15px;
+            }
+
+            .features-title {
+                font-size: 1.1rem;
+                margin-bottom: 12px;
             }
 
             .features-grid {
                 grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            .feature-item {
+                padding: 12px;
+                gap: 10px;
+            }
+
+            .feature-icon {
+                font-size: 1.2rem;
+                min-width: 35px;
+                height: 35px;
+            }
+
+            .feature-content h3 {
+                font-size: 0.9rem;
+            }
+
+            .feature-content p {
+                font-size: 0.8rem;
             }
 
             .particle {
                 display: none;
+            }
+
+            .footer {
+                padding: 15px 10px 10px;
+                font-size: 0.8rem;
+            }
+        }
+
+        /* Extra small screens */
+        @media (max-width: 400px) {
+            body {
+                padding-bottom: 220px;
+            }
+
+            .header {
+                gap: 8px;
+            }
+
+            .logo {
+                width: 40px;
+                height: 40px;
+            }
+
+            h1 {
+                font-size: 1.3rem;
+            }
+
+            .audio-controls {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .audio-btn {
+                width: 100%;
+                justify-content: center;
             }
         }
 

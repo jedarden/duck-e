@@ -336,6 +336,17 @@ var ag2client = (() => {
             _dc.send(JSON.stringify(init_chunk));
           }
           console.log("Sent init chunks to OpenAI WebRTC");
+          // Enable input audio transcription so user speech appears in transcript
+          const transcriptionConfig = {
+            type: "session.update",
+            session: {
+              input_audio_transcription: {
+                model: "whisper-1"
+              }
+            }
+          };
+          _dc.send(JSON.stringify(transcriptionConfig));
+          console.log("Enabled input audio transcription");
           for (const qmsg of quedMessages) {
             _dc.send(qmsg);
           }
