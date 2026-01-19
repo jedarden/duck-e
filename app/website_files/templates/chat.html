@@ -579,12 +579,15 @@
                 min-height: 0; /* Allow flex children to shrink */
                 border-radius: 20px 20px 0 0;
                 overflow: hidden;
+                padding-bottom: 0; /* Remove bottom padding so content stretches to edge */
             }
 
             .main-content.has-history .transcript-content {
                 flex: 1;
                 overflow-y: auto;
                 min-height: 0; /* Critical for scrolling in flex container */
+                border-radius: 12px 12px 0 0; /* Rounded top only */
+                margin-bottom: 0;
             }
 
             .main-content.has-history .features-card {
