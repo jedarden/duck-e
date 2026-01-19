@@ -994,6 +994,18 @@
             fill: currentColor;
         }
 
+        .version-badge {
+            display: inline-block;
+            margin-left: 15px;
+            padding: 4px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: 'Fira Code', 'Consolas', monospace;
+        }
+
         /* Accessibility */
         @media (prefers-reduced-motion: reduce) {
             *,
@@ -1008,6 +1020,7 @@
     <script>
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const socketUrl = `${protocol}://${window.location.host}/session`;
+        const APP_VERSION = '{{ version }}';
     </script>
     <!-- Bundled locally for CSP compliance -->
     <script src="/static/ag2client.js"></script>
@@ -1142,6 +1155,7 @@
                 </svg>
                 View on GitHub
             </a>
+            <span class="version-badge">v{{ version }}</span>
         </footer>
     </div>
 </body>

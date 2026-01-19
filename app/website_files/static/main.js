@@ -521,6 +521,12 @@ const attachPTTButtonEvents = (btn) => {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Log version to console
+  if (typeof APP_VERSION !== 'undefined') {
+    console.log(`%cDUCK-E v${APP_VERSION}`, 'color: #4F46E5; font-weight: bold; font-size: 14px;');
+    console.log(`%cDigitally Unified Conversational Knowledge Engine`, 'color: #94A3B8; font-size: 11px;');
+  }
+
   console.log('DOMContentLoaded fired - attaching event listeners');
 
   // Main controls

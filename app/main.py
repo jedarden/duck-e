@@ -144,12 +144,26 @@ cost_tracker = get_cost_tracker()
 rate_limit_config = get_rate_limit_config()
 
 
+def get_app_version() -> str:
+    """Read version from VERSION file"""
+    version_paths = [
+        Path("/app/VERSION"),  # Docker container path
+        Path(__file__).parent.parent / "VERSION",  # Local development
+    ]
+    for version_path in version_paths:
+        if version_path.exists():
+            return version_path.read_text().strip()
+    return "unknown"
+
+APP_VERSION = get_app_version()
+logger.info(f"DUCK-E version: {APP_VERSION}")
+
 @app.get("/status")
 async def index_page(request: Request):
     """
     Health check endpoint (no rate limiting for monitoring)
     """
-    return JSONResponse({"message": "WebRTC DUCK-E Server is running!", "version": "0.2.5"})
+    return JSONResponse({"message": "WebRTC DUCK-E Server is running!", "version": APP_VERSION})
 
 
 website_files_path = Path(__file__).parent / "website_files"
@@ -171,7 +185,7 @@ async def start_chat(request: Request):
     Rate limit: 30 requests per minute per IP
     """
     port = request.url.port
-    return templates.TemplateResponse("chat.html", {"request": request, "port": port})
+    return templates.TemplateResponse("chat.html", {"request": request, "port": port, "version": APP_VERSION})
 
 
 @app.websocket("/session")
