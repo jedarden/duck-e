@@ -72,46 +72,53 @@ const updatePTTUI = (enabled) => {
 
 // Set microphone enabled state
 const setMicrophoneEnabled = (enabled) => {
-  if (webRTC && webRTC.microphone) {
-    webRTC.microphone.enabled = enabled;
-    console.log(`Microphone ${enabled ? 'enabled' : 'disabled'}`);
+  console.log('setMicrophoneEnabled called:', enabled, 'webRTC:', !!webRTC);
+  if (webRTC) {
+    console.log('webRTC.microphone:', webRTC.microphone);
+    if (webRTC.microphone) {
+      webRTC.microphone.enabled = enabled;
+      console.log(`Microphone ${enabled ? 'enabled' : 'disabled'}`);
+    } else {
+      console.warn('webRTC.microphone not available');
+    }
   }
 };
 
 // Toggle mute state
 const toggleMute = () => {
-  if (!webRTC || !webRTC.microphone) {
-    console.warn('No active microphone to mute');
-    return;
-  }
+  console.log('toggleMute clicked, webRTC:', !!webRTC, 'connectionStatus:', connectionStatus);
 
+  // Allow toggling state even without connection (will apply on connect)
   isMuted = !isMuted;
-
-  // In push-to-talk mode, mute affects the base state
-  if (!isPushToTalk) {
-    setMicrophoneEnabled(!isMuted);
-  }
-
   updateMuteUI(isMuted);
   saveMuteState(isMuted);
-  console.log(`Audio ${isMuted ? 'muted' : 'unmuted'}`);
+  console.log(`Mute state toggled to: ${isMuted}`);
+
+  // Apply immediately if connected
+  if (webRTC && webRTC.microphone) {
+    setMicrophoneEnabled(!isMuted);
+  }
 };
 
 // Toggle push-to-talk mode
 const togglePushToTalk = () => {
+  console.log('togglePushToTalk clicked, current state:', isPushToTalk);
+
   isPushToTalk = !isPushToTalk;
-
-  if (isPushToTalk) {
-    // Entering PTT mode - disable mic by default
-    setMicrophoneEnabled(false);
-  } else {
-    // Leaving PTT mode - restore based on mute state
-    setMicrophoneEnabled(!isMuted);
-  }
-
   updatePTTUI(isPushToTalk);
   savePushToTalkState(isPushToTalk);
-  console.log(`Push-to-talk mode ${isPushToTalk ? 'enabled' : 'disabled'}`);
+  console.log(`Push-to-talk mode toggled to: ${isPushToTalk}`);
+
+  // Apply immediately if connected
+  if (webRTC && webRTC.microphone) {
+    if (isPushToTalk) {
+      // Entering PTT mode - disable mic by default
+      setMicrophoneEnabled(false);
+    } else {
+      // Leaving PTT mode - restore based on mute state
+      setMicrophoneEnabled(!isMuted);
+    }
+  }
 };
 
 // Push-to-talk button handlers
@@ -264,11 +271,9 @@ const updateUI = (status) => {
     statusText.textContent = "Ready to Connect";
     buttonText.textContent = "Connect";
     toggleButton.disabled = false;
-    muteBtn.disabled = true;
+    muteBtn.disabled = false; // Allow setting mute preference before connecting
     if (pttControls) pttControls.classList.add('disabled');
-    // Reset mute state on disconnect
-    isMuted = false;
-    updateMuteUI(false);
+    // Keep mute state (don't reset on disconnect)
     // Keep transcript visible but don't clear it
   }
 };
@@ -324,18 +329,29 @@ const toggleConnection = async () => {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  console.log('DOMContentLoaded fired - attaching event listeners');
+
   // Attach the toggle function to the button click.
   const toggleButton = document.getElementById("toggle-connection");
   toggleButton.addEventListener("click", toggleConnection);
+  console.log('Attached toggleConnection to button');
 
   // Attach mute button listener
   const muteBtn = document.getElementById("mute-btn");
-  muteBtn.addEventListener("click", toggleMute);
+  if (muteBtn) {
+    muteBtn.addEventListener("click", toggleMute);
+    console.log('Attached toggleMute to mute button');
+  } else {
+    console.error('mute-btn not found!');
+  }
 
   // Attach push-to-talk toggle listener
   const pttToggle = document.getElementById("ptt-toggle");
   if (pttToggle) {
     pttToggle.addEventListener("change", togglePushToTalk);
+    console.log('Attached togglePushToTalk to ptt-toggle');
+  } else {
+    console.warn('ptt-toggle not found');
   }
 
   // Attach push-to-talk button listeners (mouse and touch)
