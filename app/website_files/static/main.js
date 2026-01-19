@@ -220,7 +220,16 @@ const clearTranscript = () => {
 };
 
 const addTranscriptMessage = (role, content) => {
-  transcriptMessages.push({ role, content, timestamp: Date.now() });
+  // If user transcription arrives while assistant is streaming, insert it before the streaming message
+  // This handles Whisper's delayed transcription that arrives after assistant starts responding
+  if (role === 'user' && streamingResponse !== null) {
+    // Insert user message before the streaming assistant message
+    transcriptMessages.splice(streamingResponse.index, 0, { role, content, timestamp: Date.now() });
+    // Update streaming response index since we inserted before it
+    streamingResponse.index += 1;
+  } else {
+    transcriptMessages.push({ role, content, timestamp: Date.now() });
+  }
   renderTranscript();
   showTranscript();
 };
