@@ -268,10 +268,15 @@ var ag2client = (() => {
         const EPHEMERAL_KEY = data.client_secret.value;
         const audioEl = document.createElement("audio");
         audioEl.autoplay = true;
+        audioEl.playsInline = true; // Required for iOS
+        audioEl.style.display = "none";
+        document.body.appendChild(audioEl); // Must be in DOM for mobile browsers
         pc.ontrack = (e) => {
           const audioTrack = e.streams[0];
           if (audioTrack) {
             audioEl.srcObject = audioTrack;
+            // Explicit play for mobile browsers
+            audioEl.play().catch(err => console.log("Audio play deferred:", err));
           }
         };
         mic.enabled = false;

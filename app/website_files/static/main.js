@@ -264,6 +264,22 @@ const renderTranscript = (isStreamingUpdate = false) => {
     return;
   }
 
+  // For streaming updates, only update the streaming message's text (much faster)
+  if (isStreamingUpdate && streamingResponse) {
+    const streamingEl = container.querySelector(`[data-idx="${streamingResponse.index}"] .transcript-text`);
+    if (streamingEl) {
+      const msg = transcriptMessages[streamingResponse.index];
+      let contentHtml = msg.content || '';
+      // Simple text for streaming - skip markdown parsing for performance
+      contentHtml = contentHtml.replace(/\n/g, '<br>');
+      contentHtml += '<span class="streaming-cursor">▋</span>';
+      streamingEl.innerHTML = contentHtml;
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+  }
+
+  // Full render for new messages or finalization
   const html = transcriptMessages.map((msg, idx) => {
     const roleClass = msg.role === 'user' ? 'user' : 'assistant';
     const roleLabel = msg.role === 'user' ? 'You' : 'DUCK-E';
@@ -271,7 +287,7 @@ const renderTranscript = (isStreamingUpdate = false) => {
 
     // Parse markdown if marked is available (skip for empty streaming)
     let contentHtml = msg.content || '';
-    if (contentHtml && typeof marked !== 'undefined') {
+    if (contentHtml && typeof marked !== 'undefined' && !msg.streaming) {
       try {
         contentHtml = marked.parse(msg.content);
       } catch (e) {
