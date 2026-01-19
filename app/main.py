@@ -386,101 +386,47 @@ async def handle_media_stream(websocket: WebSocket):
 
     @realtime_agent.register_realtime_function(  # type: ignore [misc]
         name="web_search",
-        description="Search the web for current information, recent news, or specific topics using OpenAI's native web search tool. Returns comprehensive search results with sources."
+        description="Search the web for current information, recent news, or specific topics. Returns search results with titles, snippets, and sources."
     )
     def web_search(query: Annotated[str, "search_query"]) -> str:
         """
-        Search the web using OpenAI's native web_search tool with validated input.
-        Security: Prevents SQL injection, prompt injection, XSS, command injection
+        Search the web using DuckDuckGo search.
+        Security: Validates and sanitizes input query.
         """
+        from duckduckgo_search import DDGS
+
         try:
             # Validate search query
             validated_query = SearchQuery(query=query)
             safe_query = validated_query.query
 
-            logger.info(f"<-- Executing native web search for query: {safe_query} -->")
+            logger.info(f"<-- Executing DuckDuckGo web search for query: {safe_query} -->")
 
-            # Use OpenAI's chat completions with native web_search tool
-            # This is the updated approach for gpt-realtime models with native tool support
-            response = openai_client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a web search assistant. Provide concise, accurate information from web searches."
-                    },
-                    {
-                        "role": "user",
-                        "content": safe_query
-                    }
-                ],
-                tools=[
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "web_search",
-                            "description": "Search the web for current information",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {
-                                    "query": {
-                                        "type": "string",
-                                        "description": "The search query"
-                                    }
-                                },
-                                "required": ["query"]
-                            }
-                        }
-                    }
-                ],
-                tool_choice="auto",
-                temperature=1.0,
-                user="duck-e-web-search"
-            )
+            # Perform actual web search using DuckDuckGo
+            with DDGS() as ddgs:
+                results = list(ddgs.text(safe_query, max_results=5))
 
-            # Extract the response content
-            if response.choices and len(response.choices) > 0:
-                message = response.choices[0].message
-
-                # Check if tool was called
-                if hasattr(message, 'tool_calls') and message.tool_calls:
-                    logger.info(f"Web search tool called: {len(message.tool_calls)} call(s)")
-                    # When tool is called, content may be empty - the model expects tool results
-                    # Since we're using this as a one-shot search, return what we have or indicate search happened
-                    if message.content:
-                        return message.content
-                    else:
-                        # Log the tool call details for debugging
-                        for tc in message.tool_calls:
-                            logger.info(f"Tool call: {tc.function.name} with args: {tc.function.arguments}")
-                        return "I found some information but couldn't format the results. Please try asking your question differently."
-
-                # Regular response without tool call
-                if message.content:
-                    logger.info(f"Web search result length: {len(message.content)} characters")
-                    return message.content
-                else:
-                    logger.warning("No content in web search response")
-                    return "I couldn't retrieve web search results. Please try rephrasing your question."
-            else:
-                logger.warning("Empty response from web search")
+            if not results:
+                logger.warning(f"No search results for: {safe_query}")
                 return "No search results found. Please try a different query."
+
+            # Format results for voice response
+            formatted_results = []
+            for i, result in enumerate(results[:3], 1):  # Top 3 for brevity
+                title = result.get('title', 'No title')
+                body = result.get('body', 'No description')
+                # Truncate body for voice readability
+                if len(body) > 200:
+                    body = body[:200] + "..."
+                formatted_results.append(f"{i}. {title}: {body}")
+
+            response_text = " ".join(formatted_results)
+            logger.info(f"Web search returned {len(results)} results, formatted {len(formatted_results)}")
+            return response_text
 
         except ValidationError as e:
             logger.error(f"Search query validation failed for '{query}': {e}")
             return "Invalid search query. Please rephrase your question."
-        except openai.RateLimitError as e:
-            logger.warning(f"Web search rate limited: {e}")
-            return "Search service is currently busy. Please try again in a moment."
-        except openai.APITimeoutError as e:
-            logger.warning(f"Web search timed out: {e}")
-            return "Search took too long to respond. Please try a more specific query."
-        except openai.APIConnectionError as e:
-            logger.error(f"Web search connection error: {e}")
-            return "Unable to connect to search service. Please check your internet connection."
-        except openai.AuthenticationError as e:
-            logger.error(f"Web search authentication error: {e}")
-            return "Search service authentication failed. Please contact support."
         except Exception as e:
             logger.error(f"Web search error: {str(e)}", exc_info=True)
             return "I'm having trouble searching the web right now. Please try again."
