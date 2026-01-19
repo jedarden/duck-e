@@ -220,13 +220,19 @@ const clearTranscript = () => {
 };
 
 const addTranscriptMessage = (role, content) => {
-  // If user transcription arrives while assistant is streaming, insert it before the streaming message
-  // This handles Whisper's delayed transcription that arrives after assistant starts responding
-  if (role === 'user' && streamingResponse !== null) {
-    // Insert user message before the streaming assistant message
-    transcriptMessages.splice(streamingResponse.index, 0, { role, content, timestamp: Date.now() });
-    // Update streaming response index since we inserted before it
-    streamingResponse.index += 1;
+  // Handle Whisper's delayed transcription - user messages often arrive after assistant responses
+  if (role === 'user') {
+    // If streaming response is active, insert before it
+    if (streamingResponse !== null) {
+      transcriptMessages.splice(streamingResponse.index, 0, { role, content, timestamp: Date.now() });
+      streamingResponse.index += 1;
+    } else if (transcriptMessages.length > 0 && transcriptMessages[transcriptMessages.length - 1].role === 'assistant') {
+      // Last message is from assistant - insert user message before it
+      // This handles transcription arriving after response completes
+      transcriptMessages.splice(transcriptMessages.length - 1, 0, { role, content, timestamp: Date.now() });
+    } else {
+      transcriptMessages.push({ role, content, timestamp: Date.now() });
+    }
   } else {
     transcriptMessages.push({ role, content, timestamp: Date.now() });
   }
