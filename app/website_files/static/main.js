@@ -35,49 +35,76 @@ const savePushToTalkState = (enabled) => {
   localStorage.setItem('duck-e-ptt', enabled.toString());
 };
 
-// Update mute button UI
+// Update mute button UI (both main and inline)
 const updateMuteUI = (muted) => {
+  // Main controls
   const muteBtn = document.getElementById('mute-btn');
   const muteIcon = document.getElementById('mute-icon');
   const muteText = document.getElementById('mute-text');
+  // Inline controls
+  const muteBtnInline = document.getElementById('mute-btn-inline');
+  const muteIconInline = document.getElementById('mute-icon-inline');
+  const muteTextInline = document.getElementById('mute-text-inline');
 
-  if (muted) {
-    muteBtn.classList.add('muted');
-    muteIcon.textContent = '🔇';
-    muteText.textContent = 'Unmute';
-  } else {
-    muteBtn.classList.remove('muted');
-    muteIcon.textContent = '🔊';
-    muteText.textContent = 'Mute';
+  const icon = muted ? '🔇' : '🔊';
+  const text = muted ? 'Unmute' : 'Mute';
+
+  if (muteBtn) {
+    if (muted) {
+      muteBtn.classList.add('muted');
+    } else {
+      muteBtn.classList.remove('muted');
+    }
   }
+  if (muteIcon) muteIcon.textContent = icon;
+  if (muteText) muteText.textContent = text;
+
+  // Update inline controls
+  if (muteBtnInline) {
+    if (muted) {
+      muteBtnInline.classList.add('muted');
+    } else {
+      muteBtnInline.classList.remove('muted');
+    }
+  }
+  if (muteIconInline) muteIconInline.textContent = icon;
+  if (muteTextInline) muteTextInline.textContent = text;
 };
 
-// Update push-to-talk button UI
+// Update push-to-talk button UI (both main and inline)
 const updatePTTUI = (enabled) => {
   console.log('updatePTTUI called with enabled:', enabled);
+  // Main controls
   const pttToggle = document.getElementById('ptt-toggle');
   const pttBtn = document.getElementById('ptt-btn');
   const pttHint = document.querySelector('.ptt-hint');
+  // Inline controls
+  const pttToggleInline = document.getElementById('ptt-toggle-inline');
+  const pttBtnInline = document.getElementById('ptt-btn-inline');
 
-  console.log('pttToggle element:', pttToggle);
-  console.log('pttBtn element:', pttBtn);
+  if (pttToggle) pttToggle.checked = enabled;
+  if (pttToggleInline) pttToggleInline.checked = enabled;
 
-  if (pttToggle) {
-    pttToggle.checked = enabled;
-  }
-
+  // Main PTT button
   if (pttBtn) {
     if (enabled) {
       pttBtn.classList.remove('hidden');
-      pttBtn.style.display = 'flex'; // Force display
-      console.log('PTT button shown');
+      pttBtn.style.display = 'flex';
     } else {
       pttBtn.classList.add('hidden');
       pttBtn.style.display = 'none';
-      console.log('PTT button hidden');
     }
-  } else {
-    console.error('ptt-btn element not found!');
+  }
+
+  // Inline PTT button
+  if (pttBtnInline) {
+    if (enabled) {
+      pttBtnInline.classList.remove('hidden');
+      pttBtnInline.style.display = 'flex';
+    } else {
+      pttBtnInline.classList.add('hidden');
+      pttBtnInline.style.display = 'none';
+    }
   }
 
   // Show/hide the hint
@@ -142,9 +169,9 @@ const startTalking = () => {
   if (!isPushToTalk || !webRTC || !webRTC.microphone) return;
 
   const pttBtn = document.getElementById('ptt-btn');
-  if (pttBtn) {
-    pttBtn.classList.add('active');
-  }
+  const pttBtnInline = document.getElementById('ptt-btn-inline');
+  if (pttBtn) pttBtn.classList.add('active');
+  if (pttBtnInline) pttBtnInline.classList.add('active');
   setMicrophoneEnabled(true);
   console.log('PTT: Started talking');
 };
@@ -153,27 +180,42 @@ const stopTalking = () => {
   if (!isPushToTalk || !webRTC || !webRTC.microphone) return;
 
   const pttBtn = document.getElementById('ptt-btn');
-  if (pttBtn) {
-    pttBtn.classList.remove('active');
-  }
+  const pttBtnInline = document.getElementById('ptt-btn-inline');
+  if (pttBtn) pttBtn.classList.remove('active');
+  if (pttBtnInline) pttBtnInline.classList.remove('active');
   setMicrophoneEnabled(false);
   console.log('PTT: Stopped talking');
+};
+
+// Update layout based on chat history (desktop: show inline controls when has content)
+const updateLayoutMode = (hasHistory) => {
+  const mainContent = document.querySelector('.main-content');
+  if (mainContent) {
+    if (hasHistory) {
+      mainContent.classList.add('has-history');
+    } else {
+      mainContent.classList.remove('has-history');
+    }
+  }
 };
 
 // Transcript display functions
 const showTranscript = () => {
   const card = document.getElementById('transcript-card');
   if (card) card.classList.add('visible');
+  updateLayoutMode(transcriptMessages.length > 0);
 };
 
 const hideTranscript = () => {
   const card = document.getElementById('transcript-card');
   if (card) card.classList.remove('visible');
+  updateLayoutMode(false);
 };
 
 const clearTranscript = () => {
   transcriptMessages = [];
   renderTranscript();
+  updateLayoutMode(false);
 };
 
 const addTranscriptMessage = (role, content) => {
@@ -266,16 +308,26 @@ const handleWebRTCMessage = (event) => {
 
 // Function to update the UI elements based on connection status.
 const updateUI = (status) => {
+  // Main controls
   const statusIndicator = document.getElementById("status-indicator");
   const statusText = document.getElementById("status-text");
   const buttonText = document.getElementById("button-text");
   const toggleButton = document.getElementById("toggle-connection");
   const muteBtn = document.getElementById("mute-btn");
   const pttControls = document.getElementById("ptt-controls");
+  // Inline controls
+  const statusIndicatorInline = document.getElementById("status-indicator-inline");
+  const statusTextInline = document.getElementById("status-text-inline");
+  const buttonTextInline = document.getElementById("button-text-inline");
+  const toggleButtonInline = document.getElementById("toggle-connection-inline");
+  const muteBtnInline = document.getElementById("mute-btn-inline");
+  const pttControlsInline = document.getElementById("ptt-controls-inline");
 
-  // Remove all status classes
+  // Remove all status classes from both
   statusIndicator.classList.remove("connecting", "connected", "disconnected");
   toggleButton.classList.remove("connected");
+  if (statusIndicatorInline) statusIndicatorInline.classList.remove("connecting", "connected", "disconnected");
+  if (toggleButtonInline) toggleButtonInline.classList.remove("connected");
 
   if (status === "connecting") {
     statusIndicator.classList.add("connecting");
@@ -283,10 +335,15 @@ const updateUI = (status) => {
     buttonText.innerHTML = '<span class="spinner"></span>';
     toggleButton.disabled = true;
     muteBtn.disabled = true;
+    // Inline
+    if (statusIndicatorInline) statusIndicatorInline.classList.add("connecting");
+    if (statusTextInline) statusTextInline.textContent = "Connecting...";
+    if (buttonTextInline) buttonTextInline.innerHTML = '<span class="spinner"></span>';
+    if (toggleButtonInline) toggleButtonInline.disabled = true;
+    if (muteBtnInline) muteBtnInline.disabled = true;
     // Hide PTT controls while connecting
-    if (pttControls) {
-      pttControls.style.display = 'none';
-    }
+    if (pttControls) pttControls.style.display = 'none';
+    if (pttControlsInline) pttControlsInline.style.display = 'none';
   } else if (status === "connected") {
     statusIndicator.classList.add("connected");
     statusText.textContent = "Connected - DUCK-E is listening";
@@ -294,11 +351,21 @@ const updateUI = (status) => {
     toggleButton.classList.add("connected");
     toggleButton.disabled = false;
     muteBtn.disabled = false;
+    // Inline
+    if (statusIndicatorInline) statusIndicatorInline.classList.add("connected");
+    if (statusTextInline) statusTextInline.textContent = "Connected";
+    if (buttonTextInline) buttonTextInline.textContent = "Disconnect";
+    if (toggleButtonInline) {
+      toggleButtonInline.classList.add("connected");
+      toggleButtonInline.disabled = false;
+    }
+    if (muteBtnInline) muteBtnInline.disabled = false;
     // Show PTT controls when connected
     if (pttControls) {
       pttControls.style.display = 'flex';
       pttControls.classList.remove('disabled');
     }
+    if (pttControlsInline) pttControlsInline.style.display = 'flex';
     // Apply saved PTT state now that we're connected
     updatePTTUI(isPushToTalk);
   } else if (status === "disconnected") {
@@ -306,13 +373,16 @@ const updateUI = (status) => {
     statusText.textContent = "Ready to Connect";
     buttonText.textContent = "Connect";
     toggleButton.disabled = false;
-    muteBtn.disabled = false; // Allow setting mute preference before connecting
+    muteBtn.disabled = false;
+    // Inline
+    if (statusIndicatorInline) statusIndicatorInline.classList.add("disconnected");
+    if (statusTextInline) statusTextInline.textContent = "Ready";
+    if (buttonTextInline) buttonTextInline.textContent = "Connect";
+    if (toggleButtonInline) toggleButtonInline.disabled = false;
+    if (muteBtnInline) muteBtnInline.disabled = false;
     // Hide PTT controls when disconnected
-    if (pttControls) {
-      pttControls.style.display = 'none';
-    }
-    // Keep mute state (don't reset on disconnect)
-    // Keep transcript visible but don't clear it
+    if (pttControls) pttControls.style.display = 'none';
+    if (pttControlsInline) pttControlsInline.style.display = 'none';
   }
 };
 
@@ -366,51 +436,45 @@ const toggleConnection = async () => {
   }
 };
 
+// Helper to attach PTT button events (mouse and touch)
+const attachPTTButtonEvents = (btn) => {
+  if (!btn) return;
+  btn.addEventListener("mousedown", startTalking);
+  btn.addEventListener("mouseup", stopTalking);
+  btn.addEventListener("mouseleave", stopTalking);
+  btn.addEventListener("touchstart", (e) => { e.preventDefault(); startTalking(); });
+  btn.addEventListener("touchend", (e) => { e.preventDefault(); stopTalking(); });
+  btn.addEventListener("touchcancel", stopTalking);
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   console.log('DOMContentLoaded fired - attaching event listeners');
 
-  // Attach the toggle function to the button click.
+  // Main controls
   const toggleButton = document.getElementById("toggle-connection");
   toggleButton.addEventListener("click", toggleConnection);
-  console.log('Attached toggleConnection to button');
 
-  // Attach mute button listener
   const muteBtn = document.getElementById("mute-btn");
-  if (muteBtn) {
-    muteBtn.addEventListener("click", toggleMute);
-    console.log('Attached toggleMute to mute button');
-  } else {
-    console.error('mute-btn not found!');
-  }
+  if (muteBtn) muteBtn.addEventListener("click", toggleMute);
 
-  // Attach push-to-talk toggle listener
   const pttToggle = document.getElementById("ptt-toggle");
-  if (pttToggle) {
-    pttToggle.addEventListener("change", togglePushToTalk);
-    console.log('Attached togglePushToTalk to ptt-toggle');
-  } else {
-    console.warn('ptt-toggle not found');
-  }
+  if (pttToggle) pttToggle.addEventListener("change", togglePushToTalk);
 
-  // Attach push-to-talk button listeners (mouse and touch)
   const pttBtn = document.getElementById("ptt-btn");
-  if (pttBtn) {
-    // Mouse events
-    pttBtn.addEventListener("mousedown", startTalking);
-    pttBtn.addEventListener("mouseup", stopTalking);
-    pttBtn.addEventListener("mouseleave", stopTalking);
+  attachPTTButtonEvents(pttBtn);
 
-    // Touch events for mobile
-    pttBtn.addEventListener("touchstart", (e) => {
-      e.preventDefault();
-      startTalking();
-    });
-    pttBtn.addEventListener("touchend", (e) => {
-      e.preventDefault();
-      stopTalking();
-    });
-    pttBtn.addEventListener("touchcancel", stopTalking);
-  }
+  // Inline controls (desktop - below transcript)
+  const toggleButtonInline = document.getElementById("toggle-connection-inline");
+  if (toggleButtonInline) toggleButtonInline.addEventListener("click", toggleConnection);
+
+  const muteBtnInline = document.getElementById("mute-btn-inline");
+  if (muteBtnInline) muteBtnInline.addEventListener("click", toggleMute);
+
+  const pttToggleInline = document.getElementById("ptt-toggle-inline");
+  if (pttToggleInline) pttToggleInline.addEventListener("change", togglePushToTalk);
+
+  const pttBtnInline = document.getElementById("ptt-btn-inline");
+  attachPTTButtonEvents(pttBtnInline);
 
   // Keyboard shortcut for PTT (spacebar when in PTT mode)
   document.addEventListener("keydown", (e) => {

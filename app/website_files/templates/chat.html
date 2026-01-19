@@ -463,6 +463,79 @@
             display: block;
         }
 
+        /* Inline controls bar (desktop - shown when chat history exists) */
+        .inline-controls {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            padding: 15px 20px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-top: none;
+            border-radius: 0 0 20px 20px;
+            margin-top: -20px;
+        }
+
+        .inline-controls .status-indicator {
+            width: 10px;
+            height: 10px;
+        }
+
+        .inline-controls .status-text {
+            font-size: 0.9rem;
+            white-space: nowrap;
+        }
+
+        .inline-controls #toggle-connection-inline {
+            padding: 10px 24px;
+            font-size: 0.95rem;
+        }
+
+        .inline-controls .audio-btn {
+            padding: 10px 16px;
+            font-size: 0.85rem;
+        }
+
+        .inline-controls .ptt-toggle-container {
+            border-left: 1px solid var(--border);
+            padding-left: 15px;
+        }
+
+        .inline-controls .ptt-btn-inline {
+            padding: 10px 20px;
+            font-size: 0.9rem;
+            max-width: none;
+            width: auto;
+        }
+
+        .inline-controls .ptt-hint {
+            display: none;
+        }
+
+        /* Inline connect button connected state */
+        .inline-controls #toggle-connection-inline.connected {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        /* Desktop: show inline controls when has-history class is present */
+        @media (min-width: 769px) {
+            .main-content.has-history .connection-card {
+                display: none;
+            }
+
+            .main-content.has-history .inline-controls {
+                display: flex;
+                flex-wrap: wrap;
+            }
+
+            .main-content.has-history .transcript-card {
+                border-radius: 20px 20px 0 0;
+            }
+        }
+
         .transcript-header {
             display: flex;
             justify-content: space-between;
@@ -991,6 +1064,27 @@
                 <div id="transcript-content" class="transcript-content">
                     <div class="transcript-empty">Conversation transcript will appear here...</div>
                 </div>
+            </div>
+
+            <!-- Inline controls (desktop only - shown beneath transcript when has history) -->
+            <div id="inline-controls" class="inline-controls">
+                <div id="status-indicator-inline" class="status-indicator disconnected"></div>
+                <div id="status-text-inline" class="status-text">Ready</div>
+                <button id="toggle-connection-inline" class="audio-btn">
+                    <span id="button-text-inline">Connect</span>
+                </button>
+                <button id="mute-btn-inline" class="audio-btn">
+                    <span class="icon" id="mute-icon-inline">🔊</span>
+                    <span id="mute-text-inline">Mute</span>
+                </button>
+                <div id="ptt-controls-inline" class="ptt-toggle-container" style="display: none;">
+                    <span class="ptt-toggle-label">PTT</span>
+                    <input type="checkbox" id="ptt-toggle-inline" class="ptt-toggle">
+                </div>
+                <button id="ptt-btn-inline" class="ptt-btn ptt-btn-inline hidden">
+                    <span>🎤</span>
+                    <span>Hold to Talk</span>
+                </button>
             </div>
 
             <!-- Features card -->
