@@ -203,8 +203,10 @@ const updateLayoutMode = (hasHistory) => {
 // Transcript display functions
 const showTranscript = () => {
   const card = document.getElementById('transcript-card');
-  if (card) card.classList.add('visible');
-  updateLayoutMode(transcriptMessages.length > 0);
+  // Only show and switch layout when there's actual content (not empty placeholders)
+  const hasVisibleContent = transcriptMessages.some(msg => msg.content || msg.streaming);
+  if (card && hasVisibleContent) card.classList.add('visible');
+  updateLayoutMode(hasVisibleContent);
 };
 
 const hideTranscript = () => {
@@ -219,32 +221,80 @@ const clearTranscript = () => {
   updateLayoutMode(false);
 };
 
-const addTranscriptMessage = (role, content) => {
-  // Handle Whisper's delayed transcription - user messages often arrive after assistant responses
-  if (role === 'user') {
-    // If streaming response is active, insert before it
-    if (streamingResponse !== null) {
-      transcriptMessages.splice(streamingResponse.index, 0, { role, content, timestamp: Date.now() });
-      streamingResponse.index += 1;
-    } else if (transcriptMessages.length > 0 && transcriptMessages[transcriptMessages.length - 1].role === 'assistant') {
-      // Last message is from assistant - insert user message before it
-      // This handles transcription arriving after response completes
-      transcriptMessages.splice(transcriptMessages.length - 1, 0, { role, content, timestamp: Date.now() });
-    } else {
-      transcriptMessages.push({ role, content, timestamp: Date.now() });
+// Find message by itemId
+const findMessageByItemId = (itemId) => {
+  return transcriptMessages.findIndex(msg => msg.itemId === itemId);
+};
+
+// Create placeholder for conversation item (called when item is created - correct order)
+const createMessagePlaceholder = (itemId, role) => {
+  // Check if already exists
+  if (findMessageByItemId(itemId) !== -1) return;
+  transcriptMessages.push({
+    itemId,
+    role,
+    content: '',
+    timestamp: Date.now(),
+    pending: true  // Mark as waiting for transcription
+  });
+  renderTranscript();
+  showTranscript();
+};
+
+// Update message content by itemId
+const updateMessageByItemId = (itemId, content, options = {}) => {
+  const index = findMessageByItemId(itemId);
+  if (index !== -1) {
+    transcriptMessages[index].content = content;
+    transcriptMessages[index].pending = false;
+    if (options.streaming !== undefined) {
+      transcriptMessages[index].streaming = options.streaming;
     }
-  } else {
-    transcriptMessages.push({ role, content, timestamp: Date.now() });
+    renderTranscript();
+    showTranscript();
+    return index;
   }
+  return -1;
+};
+
+// Legacy function for messages without itemId
+const addTranscriptMessage = (role, content, itemId = null) => {
+  if (itemId) {
+    const index = findMessageByItemId(itemId);
+    if (index !== -1) {
+      // Update existing placeholder
+      transcriptMessages[index].content = content;
+      transcriptMessages[index].pending = false;
+      renderTranscript();
+      showTranscript();
+      return;
+    }
+  }
+  // Fallback: add new message
+  transcriptMessages.push({ role, content, timestamp: Date.now(), itemId });
   renderTranscript();
   showTranscript();
 };
 
 // Start a new streaming response (returns index)
-const startStreamingResponse = (role) => {
-  const index = transcriptMessages.length;
-  transcriptMessages.push({ role, content: '', timestamp: Date.now(), streaming: true });
-  streamingResponse = { index, content: '', role };
+const startStreamingResponse = (role, itemId = null) => {
+  let index;
+  if (itemId) {
+    index = findMessageByItemId(itemId);
+    if (index !== -1) {
+      // Use existing placeholder
+      transcriptMessages[index].streaming = true;
+      transcriptMessages[index].pending = false;
+    } else {
+      // Create new with itemId
+      index = transcriptMessages.length;
+      transcriptMessages.push({ role, content: '', timestamp: Date.now(), streaming: true, itemId });
+    }
+  } else {
+    index = transcriptMessages.length;
+    transcriptMessages.push({ role, content: '', timestamp: Date.now(), streaming: true });
+  }
+  streamingResponse = { index, content: '', role, itemId };
   renderTranscript();
   showTranscript();
   return index;
@@ -295,7 +345,15 @@ const renderTranscript = (isStreamingUpdate = false) => {
   }
 
   // Full render for new messages or finalization
-  const html = transcriptMessages.map((msg, idx) => {
+  // Filter out pending placeholders with no content
+  const visibleMessages = transcriptMessages.filter(msg => msg.content || msg.streaming);
+
+  if (visibleMessages.length === 0) {
+    container.innerHTML = '<div class="transcript-empty">Conversation transcript will appear here...</div>';
+    return;
+  }
+
+  const html = visibleMessages.map((msg, idx) => {
     const roleClass = msg.role === 'user' ? 'user' : 'assistant';
     const roleLabel = msg.role === 'user' ? 'You' : 'DUCK-E';
     const streamingClass = msg.streaming ? ' streaming' : '';
@@ -344,19 +402,35 @@ const handleWebRTCMessage = (event) => {
     }
 
     // Handle different message types from OpenAI Realtime API
-    // User's speech transcription completed
-    if (data.type === 'conversation.item.input_audio_transcription.completed') {
+
+    // Conversation item created - create placeholder in correct order
+    if (data.type === 'conversation.item.created') {
+      const item = data.item;
+      if (item && item.id && item.role) {
+        console.log('Conversation item created:', item.id, item.role);
+        createMessagePlaceholder(item.id, item.role);
+      }
+    }
+    // User's speech transcription completed - update placeholder by item_id
+    else if (data.type === 'conversation.item.input_audio_transcription.completed') {
       if (data.transcript) {
-        console.log('User transcript:', data.transcript);
-        addTranscriptMessage('user', data.transcript);
+        const itemId = data.item_id;
+        console.log('User transcript:', data.transcript, 'itemId:', itemId);
+        if (itemId && findMessageByItemId(itemId) !== -1) {
+          updateMessageByItemId(itemId, data.transcript);
+        } else {
+          // Fallback if no placeholder exists
+          addTranscriptMessage('user', data.transcript, itemId);
+        }
       }
     }
     // Assistant's audio response transcript DELTA (streaming)
     else if (data.type === 'response.audio_transcript.delta') {
       if (data.delta) {
-        // Start streaming if not already
-        if (!streamingResponse || streamingResponse.type !== 'audio_transcript') {
-          startStreamingResponse('assistant');
+        const itemId = data.item_id;
+        // Start streaming if not already or if different item
+        if (!streamingResponse || streamingResponse.type !== 'audio_transcript' || streamingResponse.itemId !== itemId) {
+          startStreamingResponse('assistant', itemId);
           if (streamingResponse) streamingResponse.type = 'audio_transcript';
         }
         appendToStreamingResponse(data.delta);
@@ -364,21 +438,23 @@ const handleWebRTCMessage = (event) => {
     }
     // Assistant's audio response transcript completed
     else if (data.type === 'response.audio_transcript.done') {
+      const itemId = data.item_id;
       if (streamingResponse && streamingResponse.type === 'audio_transcript') {
         // Finalize with the complete transcript
         finalizeStreamingResponse(data.transcript);
       } else if (data.transcript) {
         // No streaming was happening, add as complete message
         console.log('Assistant transcript:', data.transcript);
-        addTranscriptMessage('assistant', data.transcript);
+        addTranscriptMessage('assistant', data.transcript, itemId);
       }
     }
     // Assistant's text response DELTA (streaming)
     else if (data.type === 'response.text.delta') {
       if (data.delta) {
-        // Start streaming if not already
-        if (!streamingResponse || streamingResponse.type !== 'text') {
-          startStreamingResponse('assistant');
+        const itemId = data.item_id;
+        // Start streaming if not already or if different item
+        if (!streamingResponse || streamingResponse.type !== 'text' || streamingResponse.itemId !== itemId) {
+          startStreamingResponse('assistant', itemId);
           if (streamingResponse) streamingResponse.type = 'text';
         }
         appendToStreamingResponse(data.delta);
@@ -386,13 +462,14 @@ const handleWebRTCMessage = (event) => {
     }
     // Assistant's text response completed (for non-audio responses)
     else if (data.type === 'response.text.done') {
+      const itemId = data.item_id;
       if (streamingResponse && streamingResponse.type === 'text') {
         // Finalize with the complete text
         finalizeStreamingResponse(data.text);
       } else if (data.text) {
         // No streaming was happening, add as complete message
         console.log('Assistant text:', data.text);
-        addTranscriptMessage('assistant', data.text);
+        addTranscriptMessage('assistant', data.text, itemId);
       }
     }
     // Response cancelled or interrupted - finalize any streaming
