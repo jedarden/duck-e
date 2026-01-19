@@ -4,7 +4,7 @@ Implements budget caps, session tracking, and circuit breaker for API costs
 """
 from fastapi import Request, HTTPException, WebSocket
 from fastapi.responses import JSONResponse
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from datetime import datetime, timedelta
 from collections import defaultdict
 import asyncio
@@ -116,7 +116,7 @@ class SessionCostTracker:
     Supports both in-memory and Redis-backed storage
     """
 
-    def __init__(self, redis_client: Optional[redis.Redis] = None):
+    def __init__(self, redis_client: Optional[Any] = None):
         self.redis_client = redis_client
         self.config = get_cost_config()
 
