@@ -898,6 +898,8 @@
             /* When has history: hide full connection card, show inline controls */
             .main-content.has-history {
                 padding-bottom: 100px; /* Space for fixed inline controls */
+                animation: none; /* Remove transform animation that breaks position: fixed */
+                transform: none; /* Ensure no transform creates containing block */
             }
 
             .main-content.has-history .connection-card {
