@@ -905,12 +905,12 @@
             }
 
             .main-content.has-history .inline-controls {
-                display: flex;
+                display: flex !important;
                 flex-wrap: wrap;
-                position: fixed;
-                bottom: 0;
-                left: 0;
-                right: 0;
+                position: fixed !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
                 z-index: 100;
                 border-radius: 20px 20px 0 0;
                 padding: 12px 15px;
@@ -980,7 +980,7 @@
             }
 
             .ptt-hint {
-                font-size: 0.75rem;
+                display: none; /* No spacebar on mobile */
             }
 
             /* Transcript card - only show when has .visible class */
