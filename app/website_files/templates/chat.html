@@ -1372,11 +1372,8 @@
         const socketUrl = `${protocol}://${window.location.host}/session`;
         const APP_VERSION = '{{ version }}';
     </script>
-    <!-- Bundled locally for CSP compliance -->
-    <script src="/static/ag2client.js"></script>
-    <script src="/static/marked.min.js"></script>
-    <script src="/static/main.js" type="module" defer></script>
     <!-- React 18 + Agentation annotation tool (ESM only — no UMD) -->
+    <!-- importmap must appear before any type="module" scripts -->
     <script type="importmap">
     {
         "imports": {
@@ -1386,6 +1383,10 @@
         }
     }
     </script>
+    <!-- Bundled locally for CSP compliance -->
+    <script src="/static/ag2client.js"></script>
+    <script src="/static/marked.min.js"></script>
+    <script src="/static/main.js" type="module" defer></script>
 </head>
 <body>
     <!-- Animated background -->
