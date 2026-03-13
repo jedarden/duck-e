@@ -1,4 +1,3 @@
-from autogen.agentchat.realtime_agent import RealtimeAgent
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +16,7 @@ import uuid
 
 # Import configuration module for automatic OAI_CONFIG_LIST generation
 from app.config import get_realtime_config, get_swarm_config, validate_config
+from app.realtime_session import RealtimeSession
 
 # Import security middleware
 from app.middleware import (
@@ -274,7 +274,7 @@ async def handle_media_stream(websocket: WebSocket):
             await websocket.close(code=1008, reason="Missing API key")
             return
 
-        logger.info(f"Initializing RealtimeAgent with config: {len(realtime_llm_config['config_list'])} model(s) configured")
+        logger.info(f"Initializing RealtimeSession with config: {len(realtime_llm_config['config_list'])} model(s) configured")
 
         # Validate accept-language header
         accept_language_raw = headers.get('accept-language', 'en-US')
@@ -285,11 +285,12 @@ async def handle_media_stream(websocket: WebSocket):
             logger.warning(f"Invalid accept-language header: {accept_language_raw}, error: {e}")
             safe_language = "en-US"  # Fallback to safe default
 
-        realtime_agent = RealtimeAgent(
-            name="DUCK-E",
-            system_message=f"You are an AI voice assistant named DUCK-E (pronounced ducky). You can answer questions about weather (make sure to localize units based on the location), or search the web for current information. \n\nIMPORTANT: Before calling web_search, you MUST first speak to the user saying something like 'Let me search for that' or 'Searching the web for [topic]'. Only after announcing the search should you call the web_search function. Keep responses brief, two short sentences maximum. The user's browser is configured for this language <language>{safe_language}</language>",
-            llm_config=realtime_llm_config,
+        first_config = realtime_llm_config["config_list"][0]
+        session = RealtimeSession(
             websocket=websocket,
+            model=first_config["model"],
+            api_key=first_config["api_key"],
+            system_message=f"You are an AI voice assistant named DUCK-E (pronounced ducky). You can answer questions about weather (make sure to localize units based on the location), or search the web for current information. \n\nIMPORTANT: Before calling web_search, you MUST first speak to the user saying something like 'Let me search for that' or 'Searching the web for [topic]'. Only after announcing the search should you call the web_search function. Keep responses brief, two short sentences maximum. The user's browser is configured for this language <language>{safe_language}</language>",
             logger=logger,
         )
     except IndexError as e:
@@ -311,23 +312,17 @@ async def handle_media_stream(websocket: WebSocket):
         await websocket.close(code=1011, reason="Agent initialization failed")
         return
 
-    @realtime_agent.register_realtime_function(  # type: ignore [misc]
-        name="get_current_weather", description="Get the current weather in a given city."
-    )
     def get_current_weather(location: Annotated[str, "city"]) -> str:
         """
         Get current weather with validated and sanitized location input.
         Security: Prevents SQL injection, command injection, XSS, SSRF, URL injection
         """
         try:
-            # Validate location input
             validated_location = LocationInput(location=location)
             safe_location = validated_location.location
 
             logger.info(f"<-- Calling get_current_weather function for {safe_location} -->")
 
-            # Use requests.get with params dict for safe URL encoding
-            # This prevents URL injection attacks
             response = requests.get(
                 "https://api.weatherapi.com/v1/current.json",
                 params={
@@ -338,7 +333,6 @@ async def handle_media_stream(websocket: WebSocket):
                 timeout=10
             )
 
-            # Sanitize API response before returning
             if response.status_code == 200:
                 response_data = response.json()
                 sanitized_response = sanitize_api_response(response_data)
@@ -354,22 +348,30 @@ async def handle_media_stream(websocket: WebSocket):
             logger.error(f"Weather API error for '{location}': {e}")
             return json.dumps({"error": "Unable to fetch weather data"})
 
-    @realtime_agent.register_realtime_function(  # type: ignore [misc]
-        name="get_weather_forecast", description="Get the weather forecast in a given city."
+    session.register_tool(
+        name="get_current_weather",
+        description="Get the current weather in a given city.",
+        handler=get_current_weather,
+        parameters={
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "city"}
+            },
+            "required": ["location"]
+        }
     )
+
     def get_weather_forecast(location: Annotated[str, "city"]) -> str:
         """
         Get weather forecast with validated and sanitized location input.
         Security: Prevents SQL injection, command injection, XSS, SSRF, URL injection
         """
         try:
-            # Validate location input
             validated_location = LocationInput(location=location)
             safe_location = validated_location.location
 
             logger.info(f"<-- Calling get_weather_forecast function for {safe_location} -->")
 
-            # Use requests.get with params dict for safe URL encoding
             response = requests.get(
                 "https://api.weatherapi.com/v1/forecast.json",
                 params={
@@ -382,7 +384,6 @@ async def handle_media_stream(websocket: WebSocket):
                 timeout=10
             )
 
-            # Sanitize API response before returning
             if response.status_code == 200:
                 response_data = response.json()
                 sanitized_response = sanitize_api_response(response_data)
@@ -398,33 +399,38 @@ async def handle_media_stream(websocket: WebSocket):
             logger.error(f"Weather API error for '{location}': {e}")
             return json.dumps({"error": "Unable to fetch weather forecast"})
 
-    @realtime_agent.register_realtime_function(  # type: ignore [misc]
-        name="web_search",
-        description="Search the web for current information, recent news, or specific topics using OpenAI's web search. Returns up-to-date results with citations."
+    session.register_tool(
+        name="get_weather_forecast",
+        description="Get the weather forecast in a given city.",
+        handler=get_weather_forecast,
+        parameters={
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "city"}
+            },
+            "required": ["location"]
+        }
     )
+
     def web_search(query: Annotated[str, "search_query"]) -> str:
         """
         Search the web using OpenAI's Responses API with web_search tool.
         Returns current information with sourced citations.
         """
         try:
-            # Validate search query
             validated_query = SearchQuery(query=query)
             safe_query = validated_query.query
 
             logger.info(f"<-- Executing OpenAI web search for query: {safe_query} -->")
 
-            # Use OpenAI's Responses API with web_search_preview tool
             response = openai_client.responses.create(
                 model="gpt-4o-mini",
                 tools=[{"type": "web_search_preview"}],
                 input=safe_query
             )
 
-            # Extract the response text
             if hasattr(response, 'output_text') and response.output_text:
                 result_text = response.output_text
-                # Truncate for voice readability if too long
                 if len(result_text) > 500:
                     result_text = result_text[:500] + "..."
                 logger.info(f"Web search returned {len(result_text)} characters")
@@ -440,10 +446,46 @@ async def handle_media_stream(websocket: WebSocket):
             logger.error(f"Web search error: {str(e)}", exc_info=True)
             return "I'm having trouble searching the web right now. Please try again."
 
+    session.register_tool(
+        name="web_search",
+        description="Search the web for current information, recent news, or specific topics using OpenAI's web search. Returns up-to-date results with citations.",
+        handler=web_search,
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "search_query"}
+            },
+            "required": ["query"]
+        }
+    )
+
+    async def handle_voice_change(voice: str) -> str:
+        return await session.change_voice(voice)
+
+    session.register_tool(
+        name="change_voice",
+        description="Change the assistant's voice. Available voices: alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse",
+        handler=handle_voice_change,
+        parameters={
+            "type": "object",
+            "properties": {
+                "voice": {
+                    "type": "string",
+                    "enum": [
+                        "alloy", "ash", "ballad", "coral", "echo",
+                        "fable", "nova", "onyx", "sage", "shimmer", "verse"
+                    ],
+                    "description": "The voice to switch to"
+                }
+            },
+            "required": ["voice"]
+        }
+    )
+
     try:
-        await realtime_agent.run()
+        await session.run()
     except Exception as e:
-        error_msg = f"RealtimeAgent runtime error: {str(e)}"
+        error_msg = f"RealtimeSession runtime error: {str(e)}"
         logger.error(error_msg, exc_info=True)
         try:
             await websocket.send_json({

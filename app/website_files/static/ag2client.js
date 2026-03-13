@@ -256,6 +256,7 @@ var ag2client = (() => {
     }
     async connect() {
       let dc = null;
+      let audioEl = null; // Reused across reinits to avoid duplicate elements
       const quedMessages = [];
       let resolve, reject;
       let completed = new Promise((_resolve, _reject) => {
@@ -266,11 +267,14 @@ var ag2client = (() => {
       async function openRTC(init_message, webRTC, pc, ws, mic, resolve2, reject2) {
         const data = init_message.config;
         const EPHEMERAL_KEY = data.client_secret.value;
-        const audioEl = document.createElement("audio");
-        audioEl.autoplay = true;
-        audioEl.playsInline = true; // Required for iOS
-        audioEl.style.display = "none";
-        document.body.appendChild(audioEl); // Must be in DOM for mobile browsers
+        // Reuse existing audio element across reinits to avoid DOM accumulation
+        if (!audioEl) {
+          audioEl = document.createElement("audio");
+          audioEl.autoplay = true;
+          audioEl.playsInline = true; // Required for iOS
+          audioEl.style.display = "none";
+          document.body.appendChild(audioEl); // Must be in DOM for mobile browsers
+        }
         pc.ontrack = (e) => {
           const audioTrack = e.streams[0];
           if (audioTrack) {
@@ -400,6 +404,37 @@ var ag2client = (() => {
               resolve,
               reject
             );
+            return;
+          }
+          // Voice change: tear down old WebRTC peer and establish a new one
+          // with the new session config.  The old dc is set to null synchronously
+          // so any subsequent messages (e.g. function_call_output) are queued and
+          // will be replayed once the new data channel opens.
+          if (type === "ducke.reinit") {
+            console.log("ducke.reinit received — reinitialising WebRTC with new voice:", message.voice);
+            // Close old peer connection (audio element is reused)
+            if (this.pc) {
+              this.pc.close();
+              this.pc = null;
+            }
+            // Reset dc synchronously so subsequent messages are queued
+            dc = null;
+            // Create new peer connection and connect with new session config
+            this.pc = new RTCPeerConnection();
+            await openRTC(
+              message,
+              this,
+              this.pc,
+              this.ws,
+              this.microphone,
+              () => {},
+              (e) => console.error("ducke.reinit openRTC failed:", e)
+            );
+            // Notify main.js so it can display a voice-change status message
+            if (this.onMessage) {
+              const notif = { type: "ducke.voice_changed", voice: message.voice };
+              this.onMessage({ data: JSON.stringify(notif), message: notif });
+            }
             return;
           }
           const messageJSON = JSON.stringify(message);

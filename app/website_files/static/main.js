@@ -482,6 +482,11 @@ const handleWebRTCMessage = (event) => {
     else if (data.type === 'transcript') {
       addTranscriptMessage(data.role || 'assistant', data.content);
     }
+    // Voice changed — session reinitialised with new WebRTC peer
+    else if (data.type === 'ducke.voice_changed') {
+      const voice = data.voice || 'unknown';
+      addTranscriptMessage('system', `Voice changed to ${voice}`);
+    }
   } catch (e) {
     console.error('Error handling WebRTC message:', e);
   }
