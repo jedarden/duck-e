@@ -5,6 +5,92 @@ let isPushToTalk = false; // Push-to-talk mode
 let transcriptMessages = []; // Store transcript messages
 let streamingResponse = null; // Track current streaming response { index, content, type }
 
+// Cost tracking state (gpt-realtime-1.5)
+let sessionCost = {
+  startTime: null,
+  totalInputTextTokens: 0,
+  totalInputAudioTokens: 0,
+  totalOutputTextTokens: 0,
+  totalOutputAudioTokens: 0,
+  totalCachedTokens: 0,
+};
+
+// Pricing constants for gpt-realtime-1.5 (per token)
+const PRICING = {
+  textInput:   4.00  / 1_000_000,
+  textOutput:  16.00 / 1_000_000,
+  audioInput:  32.00 / 1_000_000,
+  audioOutput: 64.00 / 1_000_000,
+  cachedInput: 0.40  / 1_000_000,
+};
+
+const updateCostFromResponse = (usage) => {
+  if (!sessionCost.startTime) sessionCost.startTime = Date.now();
+
+  const details = usage.input_token_details || {};
+  const outDetails = usage.output_token_details || {};
+
+  sessionCost.totalInputTextTokens    += details.text_tokens    || 0;
+  sessionCost.totalInputAudioTokens   += details.audio_tokens   || 0;
+  sessionCost.totalCachedTokens       += details.cached_tokens  || 0;
+  sessionCost.totalOutputTextTokens   += outDetails.text_tokens  || 0;
+  sessionCost.totalOutputAudioTokens  += outDetails.audio_tokens || 0;
+
+  const totalCost =
+    (sessionCost.totalInputTextTokens   * PRICING.textInput)   +
+    (sessionCost.totalInputAudioTokens  * PRICING.audioInput)  +
+    (sessionCost.totalOutputTextTokens  * PRICING.textOutput)  +
+    (sessionCost.totalOutputAudioTokens * PRICING.audioOutput) +
+    (sessionCost.totalCachedTokens      * PRICING.cachedInput);
+
+  const elapsedMs = Date.now() - sessionCost.startTime;
+  const elapsedHours = elapsedMs / 3_600_000;
+  const hourlyRate = elapsedHours > 0 ? totalCost / elapsedHours : 0;
+
+  const costs = {
+    audioInput:  sessionCost.totalInputAudioTokens  * PRICING.audioInput,
+    audioOutput: sessionCost.totalOutputAudioTokens * PRICING.audioOutput,
+    textInput:   sessionCost.totalInputTextTokens   * PRICING.textInput,
+    textOutput:  sessionCost.totalOutputTextTokens  * PRICING.textOutput,
+    cached:      sessionCost.totalCachedTokens      * PRICING.cachedInput,
+  };
+
+  updateCostDisplay(totalCost, hourlyRate, costs, elapsedMs);
+};
+
+const updateCostDisplay = (totalCost, hourlyRate, costs, elapsedMs) => {
+  const el = document.getElementById('cost-display');
+  if (!el) return;
+  el.style.display = 'block';
+
+  const fmt = (v) => '$' + v.toFixed(2);
+  const mins = Math.floor(elapsedMs / 60000);
+  const secs = Math.floor((elapsedMs % 60000) / 1000);
+  const duration = `${mins}m ${secs.toString().padStart(2, '0')}s`;
+
+  el.innerHTML = `
+    <details class="cost-details">
+      <summary class="cost-summary">Est. ~${fmt(hourlyRate)}/hr</summary>
+      <div class="cost-breakdown">
+        <div class="cost-row"><span>Session Duration</span><span>${duration}</span></div>
+        <hr class="cost-divider">
+        <div class="cost-row"><span>Audio Input</span><span>${fmt(costs.audioInput)}</span></div>
+        <div class="cost-row"><span>Audio Output</span><span>${fmt(costs.audioOutput)}</span></div>
+        <div class="cost-row"><span>Text Input</span><span>${fmt(costs.textInput)}</span></div>
+        <div class="cost-row"><span>Text Output</span><span>${fmt(costs.textOutput)}</span></div>
+        <div class="cost-row"><span>Cached Input</span><span>${fmt(costs.cached)}</span></div>
+        <hr class="cost-divider">
+        <div class="cost-row cost-total"><span>Session Total</span><span>${fmt(totalCost)}</span></div>
+      </div>
+    </details>
+  `;
+
+  // Brief flash to indicate update
+  el.classList.remove('cost-flash');
+  void el.offsetWidth; // reflow to restart animation
+  el.classList.add('cost-flash');
+};
+
 // Configure marked for safe rendering
 if (typeof marked !== 'undefined') {
   marked.setOptions({
@@ -476,6 +562,10 @@ const handleWebRTCMessage = (event) => {
     else if (data.type === 'response.cancelled' || data.type === 'response.done') {
       if (streamingResponse) {
         finalizeStreamingResponse();
+      }
+      // Accumulate token costs from response.done usage data
+      if (data.type === 'response.done' && data.response?.usage) {
+        updateCostFromResponse(data.response.usage);
       }
     }
     // Custom transcript message from backend

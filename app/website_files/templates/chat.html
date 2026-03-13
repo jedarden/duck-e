@@ -1105,6 +1105,95 @@
             font-family: 'Fira Code', 'Consolas', monospace;
         }
 
+        /* Cost display */
+        #cost-display {
+            display: none;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .cost-details {
+            cursor: pointer;
+        }
+
+        .cost-summary {
+            list-style: none;
+            padding: 4px 8px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+            color: var(--text-muted);
+            font-size: 0.78rem;
+            font-weight: 500;
+            white-space: nowrap;
+            transition: background 0.2s ease;
+        }
+
+        .cost-summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .cost-summary::after {
+            content: ' \25B8';
+            font-size: 0.7rem;
+        }
+
+        details[open] .cost-summary::after {
+            content: ' \25BE';
+        }
+
+        .cost-summary:hover {
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+        }
+
+        .cost-breakdown {
+            position: absolute;
+            bottom: calc(100% + 8px);
+            right: 0;
+            min-width: 220px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            box-shadow: 0 8px 30px var(--shadow);
+            z-index: 200;
+            font-size: 0.8rem;
+        }
+
+        #cost-display {
+            position: relative;
+        }
+
+        .cost-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 3px 0;
+            color: var(--text-muted);
+        }
+
+        .cost-row.cost-total {
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .cost-divider {
+            border: none;
+            border-top: 1px solid var(--border);
+            margin: 6px 0;
+        }
+
+        @keyframes costFlash {
+            0%   { opacity: 1; }
+            30%  { opacity: 0.4; }
+            100% { opacity: 1; }
+        }
+
+        .cost-flash .cost-summary {
+            animation: costFlash 0.4s ease;
+        }
+
         /* Accessibility */
         @media (prefers-reduced-motion: reduce) {
             *,
@@ -1219,6 +1308,8 @@
                     <span>🎤</span>
                     <span>Hold to Talk</span>
                 </button>
+                <!-- Cost display: hidden until first response.done with usage data -->
+                <div id="cost-display"></div>
             </div>
 
             <!-- Features card -->
