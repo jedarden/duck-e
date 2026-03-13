@@ -1125,6 +1125,10 @@
     <script src="/static/ag2client.js"></script>
     <script src="/static/marked.min.js"></script>
     <script src="/static/main.js" type="module" defer></script>
+    <!-- React 18 + Agentation annotation tool -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/agentation/dist/index.umd.js" crossorigin></script>
 </head>
 <body>
     <!-- Animated background -->
@@ -1246,6 +1250,9 @@
             </div>
         </main>
 
+        <!-- Agentation annotation tool mount point -->
+        <div id="agentation-root"></div>
+
         <!-- Footer -->
         <footer class="footer">
             <a href="https://github.com/jedarden/duck-e" target="_blank" rel="noopener noreferrer">
@@ -1257,5 +1264,36 @@
             <span class="version-badge">v{{ version }}</span>
         </footer>
     </div>
+    <script>
+        // Initialize Agentation annotation tool after all scripts have loaded
+        window.addEventListener('load', function () {
+            if (typeof ReactDOM === 'undefined' || typeof Agentation === 'undefined') {
+                console.warn('Agentation or React not loaded — skipping annotation tool init');
+                return;
+            }
+            var agentationRoot = document.getElementById('agentation-root');
+            var root = ReactDOM.createRoot(agentationRoot);
+            root.render(
+                React.createElement(Agentation.Agentation, {
+                    onAnnotationAdd: function (annotation) {
+                        console.log('Annotation added:', annotation);
+                        if (typeof window.addTranscriptMessage === 'function') {
+                            window.addTranscriptMessage(
+                                'system',
+                                'Annotation on "' + (annotation.element || '') + '": ' + (annotation.comment || '')
+                            );
+                        }
+                    },
+                    onSubmit: function (output, annotations) {
+                        console.log('Agentation feedback submitted:', output);
+                        if (typeof window.addTranscriptMessage === 'function' && output) {
+                            window.addTranscriptMessage('system', 'Feedback submitted: ' + output);
+                        }
+                    },
+                    copyToClipboard: true
+                })
+            );
+        });
+    </script>
 </body>
 </html>

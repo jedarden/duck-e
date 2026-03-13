@@ -633,6 +633,9 @@ const attachPTTButtonEvents = (btn) => {
   btn.addEventListener("touchcancel", stopTalking);
 };
 
+// Expose addTranscriptMessage globally for Agentation annotation callbacks
+window.addTranscriptMessage = addTranscriptMessage;
+
 document.addEventListener("DOMContentLoaded", () => {
   // Log version to console
   if (typeof APP_VERSION !== 'undefined') {

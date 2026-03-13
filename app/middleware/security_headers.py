@@ -79,7 +79,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Default CSP for DUCK-E application
         csp_directives = [
             "default-src 'self'",
-            "script-src 'self' 'unsafe-inline'",  # Allow inline scripts for WebRTC
+            "script-src 'self' 'unsafe-inline' https://unpkg.com",  # Allow inline scripts for WebRTC and Agentation CDN
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",  # Allow Google Fonts CSS
             "img-src 'self' data: https:",         # Allow images from same origin, data URIs, HTTPS
             "connect-src 'self' wss: https:",      # Allow WebSocket and HTTPS connections
