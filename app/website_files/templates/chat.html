@@ -622,6 +622,167 @@
             color: var(--text-primary);
         }
 
+        /* Unified button system */
+        .ducke-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .ducke-btn:hover {
+            background: var(--bg-tertiary);
+            border-color: var(--primary-light);
+        }
+
+        .ducke-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .ducke-btn--primary {
+            background: var(--primary);
+            border-color: var(--primary);
+            color: white;
+        }
+
+        .ducke-btn--primary:hover {
+            background: var(--primary-dark);
+            border-color: var(--primary-dark);
+        }
+
+        .ducke-btn--danger {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .ducke-btn--danger:hover {
+            background: rgba(239, 68, 68, 0.2);
+        }
+
+        .ducke-btn--sm {
+            padding: 6px 12px;
+            font-size: 12px;
+            border-radius: 8px;
+        }
+
+        .ducke-btn--icon {
+            padding: 10px;
+            border-radius: 50%;
+        }
+
+        .ducke-btn.muted {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .ducke-btn.connected {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        /* Tool call cards in transcript */
+        .transcript-message.tool-call {
+            color: var(--text-muted);
+        }
+
+        .tool-call-details {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-tertiary);
+            overflow: hidden;
+        }
+
+        .tool-call-summary {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            user-select: none;
+            list-style: none;
+            font-size: 0.85rem;
+        }
+
+        .tool-call-summary::-webkit-details-marker {
+            display: none;
+        }
+
+        .tool-call-summary::before {
+            content: '▸';
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            transition: transform 0.2s ease;
+        }
+
+        .tool-call-details[open] .tool-call-summary::before {
+            transform: rotate(90deg);
+        }
+
+        .tool-call-icon {
+            font-size: 0.9rem;
+        }
+
+        .tool-call-name {
+            font-weight: 600;
+            color: var(--text-secondary);
+            flex: 1;
+        }
+
+        .tool-call-status {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-weight: 500;
+        }
+
+        .tool-call-status.pending {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--warning);
+        }
+
+        .tool-call-status.completed {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+
+        .tool-call-metadata {
+            padding: 10px 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .tool-call-args {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            white-space: pre-wrap;
+            word-break: break-all;
+            margin: 0;
+        }
+
+        .tool-call-result {
+            margin-top: 8px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .tool-call-result pre {
+            margin-top: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
         .transcript-content {
             max-height: 300px;
             overflow-y: auto;
@@ -1255,7 +1416,7 @@
 
                 <!-- Audio controls -->
                 <div class="audio-controls">
-                    <button id="mute-btn" class="audio-btn" disabled>
+                    <button id="mute-btn" class="audio-btn ducke-btn" disabled>
                         <span class="icon" id="mute-icon">🔊</span>
                         <span id="mute-text">Mute</span>
                     </button>
@@ -1267,7 +1428,7 @@
                         <span class="ptt-toggle-label">Push-to-Talk Mode</span>
                         <input type="checkbox" id="ptt-toggle" class="ptt-toggle">
                     </div>
-                    <button id="ptt-btn" class="ptt-btn hidden">
+                    <button id="ptt-btn" class="ptt-btn ducke-btn hidden">
                         <span>🎤</span>
                         <span>Hold to Talk</span>
                     </button>
@@ -1282,7 +1443,7 @@
                         <span>📝</span>
                         <span>Conversation</span>
                     </div>
-                    <button id="clear-transcript" class="clear-transcript-btn">Clear</button>
+                    <button id="clear-transcript" class="clear-transcript-btn ducke-btn ducke-btn--sm">Clear</button>
                 </div>
                 <div id="transcript-content" class="transcript-content">
                     <div class="transcript-empty">Conversation transcript will appear here...</div>
@@ -1293,10 +1454,10 @@
             <div id="inline-controls" class="inline-controls">
                 <div id="status-indicator-inline" class="status-indicator disconnected"></div>
                 <div id="status-text-inline" class="status-text">Ready</div>
-                <button id="toggle-connection-inline" class="audio-btn">
+                <button id="toggle-connection-inline" class="audio-btn ducke-btn">
                     <span id="button-text-inline">Connect</span>
                 </button>
-                <button id="mute-btn-inline" class="audio-btn">
+                <button id="mute-btn-inline" class="audio-btn ducke-btn">
                     <span class="icon" id="mute-icon-inline">🔊</span>
                     <span id="mute-text-inline">Mute</span>
                 </button>
@@ -1304,7 +1465,7 @@
                     <span class="ptt-toggle-label">PTT</span>
                     <input type="checkbox" id="ptt-toggle-inline" class="ptt-toggle">
                 </div>
-                <button id="ptt-btn-inline" class="ptt-btn ptt-btn-inline hidden">
+                <button id="ptt-btn-inline" class="ptt-btn ptt-btn-inline ducke-btn hidden">
                     <span>🎤</span>
                     <span>Hold to Talk</span>
                 </button>

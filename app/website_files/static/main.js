@@ -343,6 +343,22 @@ const updateMessageByItemId = (itemId, content, options = {}) => {
   return -1;
 };
 
+// Add a tool call message to the transcript
+const addToolCallMessage = (name, args, callId) => {
+  transcriptMessages.push({
+    role: 'tool',
+    type: 'tool_call',
+    toolName: name,
+    toolArgs: args,
+    callId: callId,
+    status: 'pending',
+    result: null,
+    timestamp: Date.now()
+  });
+  renderTranscript();
+  showTranscript();
+};
+
 // Legacy function for messages without itemId
 const addTranscriptMessage = (role, content, itemId = null) => {
   if (itemId) {
@@ -431,8 +447,8 @@ const renderTranscript = (isStreamingUpdate = false) => {
   }
 
   // Full render for new messages or finalization
-  // Filter out pending placeholders with no content
-  const visibleMessages = transcriptMessages.filter(msg => msg.content || msg.streaming);
+  // Filter out pending placeholders with no content (always include tool_call messages)
+  const visibleMessages = transcriptMessages.filter(msg => msg.content || msg.streaming || msg.type === 'tool_call');
 
   if (visibleMessages.length === 0) {
     container.innerHTML = '<div class="transcript-empty">Conversation transcript will appear here...</div>';
@@ -440,6 +456,30 @@ const renderTranscript = (isStreamingUpdate = false) => {
   }
 
   const html = visibleMessages.map((msg, idx) => {
+    // Tool call messages get a collapsible card rendering
+    if (msg.type === 'tool_call') {
+      let argsFormatted = msg.toolArgs || '';
+      try {
+        argsFormatted = JSON.stringify(JSON.parse(msg.toolArgs), null, 2);
+      } catch (e) { /* keep raw */ }
+      const statusClass = msg.status === 'completed' ? 'completed' : 'pending';
+      return `
+        <div class="transcript-message tool-call" data-idx="${idx}">
+          <details class="tool-call-details">
+            <summary class="tool-call-summary">
+              <span class="tool-call-icon">🔧</span>
+              <span class="tool-call-name">${msg.toolName}</span>
+              <span class="tool-call-status ${statusClass}">${msg.status}</span>
+            </summary>
+            <div class="tool-call-metadata">
+              <pre class="tool-call-args">${argsFormatted}</pre>
+              ${msg.result ? `<div class="tool-call-result"><strong>Result:</strong><pre>${msg.result}</pre></div>` : ''}
+            </div>
+          </details>
+        </div>
+      `;
+    }
+
     const roleClass = msg.role === 'user' ? 'user' : 'assistant';
     const roleLabel = msg.role === 'user' ? 'You' : 'DUCK-E';
     const streamingClass = msg.streaming ? ' streaming' : '';
@@ -556,6 +596,27 @@ const handleWebRTCMessage = (event) => {
         // No streaming was happening, add as complete message
         console.log('Assistant text:', data.text);
         addTranscriptMessage('assistant', data.text, itemId);
+      }
+    }
+    // Function call arguments complete - display tool call card in transcript
+    else if (data.type === 'response.function_call_arguments.done') {
+      const name = data.name;
+      const callId = data.call_id;
+      const args = data.arguments;
+      console.log('Tool call:', name, callId, args);
+      addToolCallMessage(name, args, callId);
+    }
+    // Output item done - mark matching tool call as completed
+    else if (data.type === 'response.output_item.done') {
+      const item = data.item;
+      if (item && item.type === 'function_call') {
+        const idx = transcriptMessages.findIndex(
+          msg => msg.type === 'tool_call' && msg.callId === item.call_id
+        );
+        if (idx !== -1) {
+          transcriptMessages[idx].status = 'completed';
+          renderTranscript();
+        }
       }
     }
     // Response cancelled or interrupted - finalize any streaming
@@ -723,8 +784,9 @@ const attachPTTButtonEvents = (btn) => {
   btn.addEventListener("touchcancel", stopTalking);
 };
 
-// Expose addTranscriptMessage globally for Agentation annotation callbacks
+// Expose transcript functions globally for Agentation annotation callbacks
 window.addTranscriptMessage = addTranscriptMessage;
+window.addToolCallMessage = addToolCallMessage;
 
 document.addEventListener("DOMContentLoaded", () => {
   // Log version to console
