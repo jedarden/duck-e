@@ -1,4 +1,4 @@
 # Beads Project Configuration
-# issue_prefix: duck-e
-# default_priority: 2
-# default_type: task
+issue_prefix: duck-e
+default_priority: 2
+default_type: task
