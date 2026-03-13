@@ -88,3 +88,73 @@ test.describe('Text Transcript Feature', () => {
     await expect(markedScript).toBeAttached();
   });
 });
+
+test.describe('Agentation Annotation Tool', () => {
+  const baseUrl = process.env.BASE_URL || 'http://duck-e-test.ducke.svc.cluster.local:8000';
+
+  test('agentation-root mount point exists in DOM', async ({ page }) => {
+    await page.goto(baseUrl);
+
+    const agentationRoot = page.locator('#agentation-root');
+    await expect(agentationRoot).toBeAttached();
+  });
+
+  test('agentation-root is outside main content', async ({ page }) => {
+    await page.goto(baseUrl);
+
+    // agentation-root should be a direct child of .container, not inside main
+    const insideMain = page.locator('main #agentation-root');
+    await expect(insideMain).not.toBeAttached();
+
+    const outsideMain = page.locator('#agentation-root');
+    await expect(outsideMain).toBeAttached();
+  });
+
+  test('importmap script tag is present', async ({ page }) => {
+    await page.goto(baseUrl);
+
+    const importmap = page.locator('script[type="importmap"]');
+    await expect(importmap).toBeAttached();
+  });
+
+  test('importmap contains react entry', async ({ page }) => {
+    await page.goto(baseUrl);
+
+    const importmapContent = await page.locator('script[type="importmap"]').textContent();
+    const importmap = JSON.parse(importmapContent || '{}');
+    expect(importmap.imports).toBeDefined();
+    expect(importmap.imports['react']).toContain('esm.sh');
+  });
+
+  test('agentation module script tag is present', async ({ page }) => {
+    await page.goto(baseUrl);
+
+    // Find the module script that loads agentation
+    const moduleScripts = page.locator('script[type="module"]');
+    const count = await moduleScripts.count();
+    let agentationFound = false;
+    for (let i = 0; i < count; i++) {
+      const content = await moduleScripts.nth(i).textContent();
+      if (content && content.includes('agentation')) {
+        agentationFound = true;
+        break;
+      }
+    }
+    expect(agentationFound).toBe(true);
+  });
+
+  test('agentation component mounts without JS errors', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (err) => errors.push(err.message));
+
+    await page.goto(baseUrl);
+    // Wait for module scripts to execute
+    await page.waitForTimeout(3000);
+
+    const agentationErrors = errors.filter(e =>
+      e.toLowerCase().includes('agentation') ||
+      (e.toLowerCase().includes('react') && e.toLowerCase().includes('error'))
+    );
+    expect(agentationErrors).toHaveLength(0);
+  });
+});
