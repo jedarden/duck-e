@@ -538,6 +538,11 @@
                 order: 2;
             }
 
+            /* Cost panel second (between transcript and inline controls) */
+            #cost-panel {
+                order: 2;
+            }
+
             /* Inline controls third (hidden by default) */
             .inline-controls {
                 order: 3;
@@ -1281,19 +1286,12 @@
             font-family: 'Fira Code', 'Consolas', monospace;
         }
 
-        /* Cost display */
+        /* Cost display button (in inline-controls) */
         #cost-display {
             display: none;
-            font-size: 0.8rem;
-            color: var(--text-muted);
         }
 
-        .cost-details {
-            cursor: pointer;
-        }
-
-        .cost-summary {
-            list-style: none;
+        .cost-toggle-btn {
             padding: 4px 8px;
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -1302,43 +1300,34 @@
             font-size: 0.78rem;
             font-weight: 500;
             white-space: nowrap;
+            cursor: pointer;
             transition: background 0.2s ease;
         }
 
-        .cost-summary::-webkit-details-marker {
-            display: none;
-        }
-
-        .cost-summary::after {
-            content: ' \25B8';
-            font-size: 0.7rem;
-        }
-
-        details[open] .cost-summary::after {
-            content: ' \25BE';
-        }
-
-        .cost-summary:hover {
+        .cost-toggle-btn:hover {
             background: var(--bg-primary);
             color: var(--text-secondary);
         }
 
-        .cost-breakdown {
-            position: absolute;
-            bottom: calc(100% + 8px);
-            right: 0;
-            min-width: 220px;
+        /* Cost panel: slides in between transcript-card and inline-controls */
+        #cost-panel {
+            display: none;
+            overflow: hidden;
+            max-height: 0;
             background: var(--bg-secondary);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 12px;
-            box-shadow: 0 8px 30px var(--shadow);
-            z-index: 200;
-            font-size: 0.8rem;
+            border-left: 1px solid var(--border);
+            border-right: 1px solid var(--border);
+            transition: max-height 0.25s ease, padding 0.25s ease;
+            padding: 0 20px;
         }
 
-        #cost-display {
-            position: relative;
+        #cost-panel.open {
+            max-height: 300px;
+            padding: 16px 20px;
+        }
+
+        .cost-breakdown {
+            font-size: 0.8rem;
         }
 
         .cost-row {
@@ -1366,7 +1355,7 @@
             100% { opacity: 1; }
         }
 
-        .cost-flash .cost-summary {
+        .cost-flash .cost-toggle-btn {
             animation: costFlash 0.4s ease;
         }
 
@@ -1472,6 +1461,9 @@
                     <div class="transcript-empty">Conversation transcript will appear here...</div>
                 </div>
             </div>
+
+            <!-- Cost panel: slides in between transcript and controls -->
+            <div id="cost-panel"></div>
 
             <!-- Inline controls (desktop only - shown beneath transcript when has history) -->
             <div id="inline-controls" class="inline-controls">

@@ -58,31 +58,39 @@ const updateCostFromResponse = (usage) => {
   updateCostDisplay(totalCost, hourlyRate, costs, elapsedMs);
 };
 
+let costPanelListenerAttached = false;
+
 const updateCostDisplay = (totalCost, hourlyRate, costs, elapsedMs) => {
   const el = document.getElementById('cost-display');
-  if (!el) return;
+  const panel = document.getElementById('cost-panel');
+  if (!el || !panel) return;
   el.style.display = 'block';
+  panel.style.display = 'block';
 
   const fmt = (v) => '$' + v.toFixed(2);
   const mins = Math.floor(elapsedMs / 60000);
   const secs = Math.floor((elapsedMs % 60000) / 1000);
   const duration = `${mins}m ${secs.toString().padStart(2, '0')}s`;
 
-  el.innerHTML = `
-    <details class="cost-details">
-      <summary class="cost-summary">Est. ~${fmt(hourlyRate)}/hr</summary>
-      <div class="cost-breakdown">
-        <div class="cost-row"><span>Session Duration</span><span>${duration}</span></div>
-        <hr class="cost-divider">
-        <div class="cost-row"><span>Audio Input</span><span>${fmt(costs.audioInput)}</span></div>
-        <div class="cost-row"><span>Audio Output</span><span>${fmt(costs.audioOutput)}</span></div>
-        <div class="cost-row"><span>Text Input</span><span>${fmt(costs.textInput)}</span></div>
-        <div class="cost-row"><span>Text Output</span><span>${fmt(costs.textOutput)}</span></div>
-        <div class="cost-row"><span>Cached Input</span><span>${fmt(costs.cached)}</span></div>
-        <hr class="cost-divider">
-        <div class="cost-row cost-total"><span>Session Total</span><span>${fmt(totalCost)}</span></div>
-      </div>
-    </details>
+  el.innerHTML = `<button class="cost-toggle-btn">Est. ~${fmt(hourlyRate)}/hr</button>`;
+
+  if (!costPanelListenerAttached) {
+    el.addEventListener('click', () => panel.classList.toggle('open'));
+    costPanelListenerAttached = true;
+  }
+
+  panel.innerHTML = `
+    <div class="cost-breakdown">
+      <div class="cost-row"><span>Session Duration</span><span>${duration}</span></div>
+      <hr class="cost-divider">
+      <div class="cost-row"><span>Audio Input</span><span>${fmt(costs.audioInput)}</span></div>
+      <div class="cost-row"><span>Audio Output</span><span>${fmt(costs.audioOutput)}</span></div>
+      <div class="cost-row"><span>Text Input</span><span>${fmt(costs.textInput)}</span></div>
+      <div class="cost-row"><span>Text Output</span><span>${fmt(costs.textOutput)}</span></div>
+      <div class="cost-row"><span>Cached Input</span><span>${fmt(costs.cached)}</span></div>
+      <hr class="cost-divider">
+      <div class="cost-row cost-total"><span>Session Total</span><span>${fmt(totalCost)}</span></div>
+    </div>
   `;
 
   // Brief flash to indicate update
