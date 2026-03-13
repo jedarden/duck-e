@@ -16,6 +16,7 @@ import uuid
 
 # Import configuration module for automatic OAI_CONFIG_LIST generation
 from app.config import get_realtime_config, get_swarm_config, validate_config
+from app.memory import UserMemoryStore
 from app.realtime_session import RealtimeSession
 
 # Import security middleware
@@ -211,7 +212,19 @@ async def handle_media_stream(websocket: WebSocket):
     logger = getLogger("uvicorn.error")
     logger.info(f"Incoming WebSocket headers: {headers}")
     logger.info(f"Session ID for cost tracking: {session_id}")
-    logger.info(headers.get('x-forwarded-user'))
+
+    # Extract user identity from OAuth proxy headers
+    forwarded_user = headers.get('x-forwarded-user', '')
+    forwarded_email = headers.get('x-forwarded-email', '')
+    forwarded_name = headers.get('x-forwarded-name', '')
+    logger.info(f"User identity: user={forwarded_user} email={forwarded_email} name={forwarded_name}")
+
+    # Load per-user memory (keyed by email if available, else user id)
+    user_identity = forwarded_email or forwarded_user
+    memory_store: UserMemoryStore | None = None
+    if user_identity:
+        memory_store = UserMemoryStore(user_identity)
+        memory_store.load()
 
     # Initialize cost tracking for this session
     await cost_tracker.start_session(session_id)
@@ -286,11 +299,41 @@ async def handle_media_stream(websocket: WebSocket):
             safe_language = "en-US"  # Fallback to safe default
 
         first_config = realtime_llm_config["config_list"][0]
+
+        # Build system message, optionally augmented with user identity and memories
+        base_system_message = (
+            f"You are an AI voice assistant named DUCK-E (pronounced ducky). "
+            f"You can answer questions about weather (make sure to localize units based on the location), "
+            f"or search the web for current information. \n\n"
+            f"IMPORTANT: Before calling web_search, you MUST first speak to the user saying something like "
+            f"'Let me search for that' or 'Searching the web for [topic]'. Only after announcing the search "
+            f"should you call the web_search function. Keep responses brief, two short sentences maximum. "
+            f"The user's browser is configured for this language <language>{safe_language}</language>"
+        )
+
+        if memory_store is not None:
+            user_display = forwarded_name or forwarded_email or forwarded_user
+            facts = memory_store.get_facts()
+            memory_section = f"\n\nThe current user is {user_display}"
+            if forwarded_email and forwarded_email != user_display:
+                memory_section += f" ({forwarded_email})"
+            memory_section += "."
+            if facts:
+                memory_section += "\nHere are things you remember about this user:\n"
+                memory_section += "\n".join(f"- {f}" for f in facts)
+            memory_section += (
+                "\nUse save_memory when you learn preferences or important information about the user. "
+                "Use recall_memories to retrieve what you know about the user on demand."
+            )
+            system_message = base_system_message + memory_section
+        else:
+            system_message = base_system_message
+
         session = RealtimeSession(
             websocket=websocket,
             model=first_config["model"],
             api_key=first_config["api_key"],
-            system_message=f"You are an AI voice assistant named DUCK-E (pronounced ducky). You can answer questions about weather (make sure to localize units based on the location), or search the web for current information. \n\nIMPORTANT: Before calling web_search, you MUST first speak to the user saying something like 'Let me search for that' or 'Searching the web for [topic]'. Only after announcing the search should you call the web_search function. Keep responses brief, two short sentences maximum. The user's browser is configured for this language <language>{safe_language}</language>",
+            system_message=system_message,
             logger=logger,
         )
     except IndexError as e:
@@ -458,6 +501,49 @@ async def handle_media_stream(websocket: WebSocket):
             "required": ["query"]
         }
     )
+
+    if memory_store is not None:
+        def save_memory(fact: str) -> str:
+            """Save a fact about the current user to persistent memory."""
+            fact = fact.strip()
+            if not fact:
+                return json.dumps({"status": "error", "message": "Fact cannot be empty."})
+            memory_store.add_fact(fact)
+            logger.info(f"Saved memory for user {user_identity!r}: {fact!r}")
+            return json.dumps({"status": "ok", "message": "Memory saved."})
+
+        session.register_tool(
+            name="save_memory",
+            description="Save a fact or preference about the current user for future sessions.",
+            handler=save_memory,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "fact": {
+                        "type": "string",
+                        "description": "The fact or preference to remember about the user."
+                    }
+                },
+                "required": ["fact"]
+            }
+        )
+
+        def recall_memories() -> str:
+            """Retrieve stored memories about the current user."""
+            facts = memory_store.get_facts()
+            if facts:
+                return json.dumps({"facts": facts})
+            return json.dumps({"facts": [], "message": "No memories stored for this user yet."})
+
+        session.register_tool(
+            name="recall_memories",
+            description="Retrieve stored facts and preferences about the current user.",
+            handler=recall_memories,
+            parameters={
+                "type": "object",
+                "properties": {}
+            }
+        )
 
     async def handle_voice_change(voice: str) -> str:
         return await session.change_voice(voice)
