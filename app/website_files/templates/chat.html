@@ -1585,6 +1585,10 @@
                             if (typeof window.addTranscriptMessage === 'function' && output) {
                                 window.addTranscriptMessage('system', 'Feedback submitted: ' + output);
                             }
+                            // Relay structured annotation data to the backend
+                            if (typeof window.sendAnnotationToBackend === 'function') {
+                                window.sendAnnotationToBackend({ output: output, annotations: annotations });
+                            }
                         },
                         copyToClipboard: true
                     })

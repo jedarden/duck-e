@@ -150,3 +150,76 @@ class TestCSPAllowsEsmSh:
         assert "https://esm.sh" in script_src, (
             "script-src must include https://esm.sh"
         )
+
+
+class TestRuntimeVerification:
+    """Tests for runtime verification (load status) and error boundary."""
+
+    def _get_agentation_script(self, html):
+        match = re.search(r'<script type="module">(.*?)</script>', html, re.DOTALL)
+        assert match, "agentation module script not found"
+        return match.group(1)
+
+    def test_agentation_status_global_initialized(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        assert "window.agentationStatus" in script, (
+            "Script must initialize window.agentationStatus for runtime verification"
+        )
+
+    def test_agentation_status_tracks_loaded(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        assert "agentationStatus.loaded" in script, (
+            "Script must set agentationStatus.loaded after successful mount"
+        )
+
+    def test_agentation_status_tracks_error(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        assert "agentationStatus.error" in script, (
+            "Script must record agentationStatus.error on failure"
+        )
+
+    def test_dynamic_import_used(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        # Dynamic import allows try/catch around module loading failures
+        assert "await import(" in script, (
+            "Agentation must be loaded via dynamic import() so failures are catchable"
+        )
+
+    def test_try_catch_wraps_load(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        assert "try {" in script and "catch" in script, (
+            "Module load must be wrapped in try/catch for graceful error handling"
+        )
+
+    def test_error_boundary_class_present(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        assert "AgentationErrorBoundary" in script, (
+            "An error boundary class must be defined to catch React render errors"
+        )
+
+    def test_error_boundary_extends_react_component(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        assert "extends React.Component" in script, (
+            "AgentationErrorBoundary must extend React.Component"
+        )
+
+    def test_error_boundary_get_derived_state(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        assert "getDerivedStateFromError" in script, (
+            "Error boundary must implement getDerivedStateFromError"
+        )
+
+    def test_error_boundary_component_did_catch(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        assert "componentDidCatch" in script, (
+            "Error boundary must implement componentDidCatch to log errors"
+        )
+
+    def test_agentation_wrapped_in_error_boundary(self, chat_html_content):
+        script = self._get_agentation_script(chat_html_content)
+        # Error boundary must wrap the Agentation element
+        boundary_pos = script.find("AgentationErrorBoundary")
+        agentation_el_pos = script.find("React.createElement(Agentation")
+        assert boundary_pos < agentation_el_pos, (
+            "AgentationErrorBoundary must wrap the Agentation component"
+        )
