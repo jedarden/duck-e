@@ -437,6 +437,19 @@ var ag2client = (() => {
             }
             return;
           }
+          // Forward function_call_output to onMessage so the transcript can
+          // display the tool result before it is relayed to OpenAI.
+          if (
+            type === "conversation.item.create" &&
+            message.item?.type === "function_call_output" &&
+            this.onMessage
+          ) {
+            try {
+              this.onMessage({ data: event.data, message: message });
+            } catch (callbackError) {
+              console.error("Error in onMessage callback for function_call_output", callbackError);
+            }
+          }
           const messageJSON = JSON.stringify(message);
           if (dc) {
             dc.send(messageJSON);

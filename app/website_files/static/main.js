@@ -606,6 +606,19 @@ const handleWebRTCMessage = (event) => {
       console.log('Tool call:', name, callId, args);
       addToolCallMessage(name, args, callId);
     }
+    // Function call output from backend relay - populate tool result on the card
+    else if (data.type === 'conversation.item.create' && data.item?.type === 'function_call_output') {
+      const callId = data.item.call_id;
+      const output = data.item.output;
+      console.log('Tool result received for call_id:', callId, output);
+      const idx = transcriptMessages.findIndex(
+        msg => msg.type === 'tool_call' && msg.callId === callId
+      );
+      if (idx !== -1) {
+        transcriptMessages[idx].result = output;
+        renderTranscript();
+      }
+    }
     // Output item done - mark matching tool call as completed
     else if (data.type === 'response.output_item.done') {
       const item = data.item;
