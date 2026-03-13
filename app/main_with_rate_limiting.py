@@ -1,4 +1,6 @@
-from autogen.agentchat.realtime_agent import RealtimeAgent
+# AG2 RealtimeAgent removed — this file is a legacy reference only.
+# The active implementation uses app.realtime_session.RealtimeSession (see main.py).
+from app.realtime_session import RealtimeSession
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles

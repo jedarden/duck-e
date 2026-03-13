@@ -15,23 +15,19 @@ from typing import List, Tuple
 class TestDependencyCompatibility:
     """Test dependency compatibility and version constraints."""
 
-    def test_pydantic_version_satisfies_ag2_requirement(self):
+    def test_pydantic_version_meets_minimum(self):
         """
-        Test that pydantic version satisfies ag2's requirement (>=2.6.1).
-
-        RED Phase: This test should FAIL with pydantic==2.5.3
-        GREEN Phase: This test should PASS with pydantic>=2.6.1,<3.0
+        Test that pydantic version is >=2.6.1 as required by fastapi and other deps.
         """
         try:
             import pydantic
             pydantic_version = version.parse(pydantic.__version__)
 
-            # ag2==0.9.10 requires pydantic>=2.6.1
             min_required_version = version.parse("2.6.1")
 
             assert pydantic_version >= min_required_version, (
                 f"pydantic version {pydantic_version} does not satisfy "
-                f"ag2's requirement of >=2.6.1"
+                f"minimum requirement of >=2.6.1"
             )
         except ImportError:
             pytest.fail("pydantic is not installed")
@@ -59,7 +55,6 @@ class TestDependencyCompatibility:
         This ensures that the dependency resolution didn't break any imports.
         """
         required_packages = [
-            "autogen",  # ag2 package imports as 'autogen'
             "fastapi",
             "uvicorn",
             "websockets",
@@ -119,20 +114,6 @@ class TestDependencyCompatibility:
         # Should validate correctly
         with pytest.raises(Exception):  # Should raise ValidationError
             TestModel(name="test", value=-1)
-
-    def test_ag2_imports_successfully(self):
-        """
-        Test that ag2 can be imported and its core components are accessible.
-
-        This verifies that ag2 works with the pydantic version.
-        Note: ag2 package imports as 'autogen', not 'ag2'.
-        """
-        try:
-            import autogen  # ag2 package imports as 'autogen'
-            # Verify autogen has expected attributes
-            assert hasattr(autogen, "__version__"), "autogen should have __version__ attribute"
-        except ImportError as e:
-            pytest.fail(f"Failed to import autogen (ag2): {e}")
 
     def test_fastapi_with_pydantic_integration(self):
         """
@@ -207,7 +188,6 @@ class TestRegressionPrevention:
         """
         # Known packages that depend on pydantic
         pydantic_dependent_packages = [
-            ("ag2", "2.6.1"),  # ag2 requires pydantic>=2.6.1
             ("fastapi", "2.0.0"),  # fastapi requires pydantic>=2.0.0
         ]
 
