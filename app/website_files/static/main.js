@@ -788,6 +788,17 @@ const attachPTTButtonEvents = (btn) => {
 window.addTranscriptMessage = addTranscriptMessage;
 window.addToolCallMessage = addToolCallMessage;
 
+// Send a structured annotation to the backend via WebSocket.
+// Called by the Agentation onSubmit callback when the user submits feedback.
+window.sendAnnotationToBackend = (annotation) => {
+  if (webRTC && webRTC.ws && webRTC.ws.readyState === WebSocket.OPEN) {
+    webRTC.ws.send(JSON.stringify({
+      type: 'ducke.annotation',
+      annotation: annotation,
+    }));
+  }
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   // Log version to console
   if (typeof APP_VERSION !== 'undefined') {

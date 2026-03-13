@@ -89,8 +89,8 @@
             padding: 20px;
             display: flex;
             flex-direction: column;
-            height: 100vh;
-            overflow: hidden;
+            min-height: 100vh;
+            flex: 1;
         }
 
         /* Header */
@@ -570,16 +570,13 @@
 
             .main-content.has-history .transcript-card,
             .main-content.has-history .transcript-card.visible {
-                flex: 1;
                 display: flex !important;
                 flex-direction: column;
                 border-radius: 20px 20px 0 0;
-                overflow-y: auto;
                 padding-bottom: 0; /* Remove bottom padding so content stretches to edge */
             }
 
             .main-content.has-history .transcript-content {
-                flex: 1;
                 max-height: none; /* Override base max-height: 300px */
                 border-radius: 12px 12px 0 0; /* Rounded top only */
                 margin: 0;
@@ -1194,6 +1191,19 @@
                 padding: 15px 10px 10px;
                 font-size: 0.8rem;
             }
+
+            /* Agentation overlay: sits above content but below fixed bottom controls.
+               Fixed controls are bumped to z-index 200 so they remain reachable
+               even when the annotation overlay is active. */
+            .main-content.has-history .inline-controls {
+                z-index: 200;
+            }
+
+            #agentation-root {
+                /* Establish a stacking context so agentation children are grouped */
+                position: relative;
+                z-index: 150;
+            }
         }
 
         /* Extra small screens */
@@ -1528,30 +1538,63 @@
     <script type="module">
         import React from 'react';
         import { createRoot } from 'react-dom/client';
-        import { Agentation } from 'https://esm.sh/agentation@2.3.2?external=react,react-dom';
 
-        const agentationRoot = document.getElementById('agentation-root');
-        const root = createRoot(agentationRoot);
-        root.render(
-            React.createElement(Agentation, {
-                onAnnotationAdd: function (annotation) {
-                    console.log('Annotation added:', annotation);
-                    if (typeof window.addTranscriptMessage === 'function') {
-                        window.addTranscriptMessage(
-                            'system',
-                            'Annotation on "' + (annotation.element || '') + '": ' + (annotation.comment || '')
-                        );
-                    }
-                },
-                onSubmit: function (output, annotations) {
-                    console.log('Agentation feedback submitted:', output);
-                    if (typeof window.addTranscriptMessage === 'function' && output) {
-                        window.addTranscriptMessage('system', 'Feedback submitted: ' + output);
-                    }
-                },
-                copyToClipboard: true
-            })
-        );
+        // Runtime verification: expose load status globally for monitoring/debugging
+        window.agentationStatus = { loaded: false, error: null };
+
+        // Error boundary: catches React render errors so agentation crashes don't affect the rest of the UI
+        class AgentationErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false };
+            }
+            static getDerivedStateFromError() {
+                return { hasError: true };
+            }
+            componentDidCatch(error, info) {
+                console.error('[Agentation] Component error caught by boundary:', error, info);
+                window.agentationStatus.error = error.message;
+            }
+            render() {
+                if (this.state.hasError) {
+                    // Degrade gracefully — hide agentation without breaking the page
+                    return null;
+                }
+                return this.props.children;
+            }
+        }
+
+        try {
+            const { Agentation } = await import('https://esm.sh/agentation@2.3.2?external=react,react-dom');
+            const agentationRoot = document.getElementById('agentation-root');
+            const root = createRoot(agentationRoot);
+            root.render(
+                React.createElement(AgentationErrorBoundary, null,
+                    React.createElement(Agentation, {
+                        onAnnotationAdd: function (annotation) {
+                            console.log('Annotation added:', annotation);
+                            if (typeof window.addTranscriptMessage === 'function') {
+                                window.addTranscriptMessage(
+                                    'system',
+                                    'Annotation on "' + (annotation.element || '') + '": ' + (annotation.comment || '')
+                                );
+                            }
+                        },
+                        onSubmit: function (output, annotations) {
+                            console.log('Agentation feedback submitted:', output);
+                            if (typeof window.addTranscriptMessage === 'function' && output) {
+                                window.addTranscriptMessage('system', 'Feedback submitted: ' + output);
+                            }
+                        },
+                        copyToClipboard: true
+                    })
+                )
+            );
+            window.agentationStatus.loaded = true;
+        } catch (err) {
+            console.error('[Agentation] Failed to load:', err);
+            window.agentationStatus.error = err.message;
+        }
     </script>
 </body>
 </html>

@@ -178,6 +178,9 @@ class RealtimeSession:
                 msg_type = data.get("type", "")
                 if msg_type == "response.function_call_arguments.done":
                     await self._handle_tool_call(data)
+                elif msg_type == "ducke.annotation":
+                    annotation = data.get("annotation", {})
+                    self.logger.info(f"Annotation received from client: {annotation}")
         except WebSocketDisconnect:
             pass
         except Exception as e:
