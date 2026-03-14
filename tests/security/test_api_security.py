@@ -152,7 +152,7 @@ class TestSSRFProtection:
 
         ssrf = SSRFProtection()
 
-        assert not ssrf.validate_url("http://user:pass@internal.server/")
+        assert not ssrf.validate_url("http://user:pass@internal.server/")  # pragma: allowlist secret
         assert not ssrf.validate_url("https://admin@localhost/config")
 
     def test_redirect_following_disabled(self):
