@@ -27,6 +27,10 @@ regex = '''.*\.env\.example'''
 description = "Test fixtures"
 regex = '''tests?/.*fixtures?/.*'''
 
+[[allowlist.paths]]
+description = "Security tests using intentionally credential-shaped URLs and values to verify SSRF/auth protections"
+regex = '''tests?/security/.*'''
+
 [[allowlist.commits]]
 # Allow the original security hardening commit (contains only template values)
 description = "Initial security hardening release with template credentials"
