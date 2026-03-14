@@ -213,7 +213,7 @@ services:
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
 
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-changeme}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_SERVER_ROOT_URL=https://grafana.ducke.app
       - GF_SECURITY_COOKIE_SECURE=true
