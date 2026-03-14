@@ -255,6 +255,11 @@ class RealtimeSession:
             },
         })
 
+        # Trigger the model to generate an audio response after the tool result.
+        # The Realtime API does not auto-respond after function_call_output —
+        # an explicit response.create is required.
+        await self.websocket.send_json({"type": "response.create"})
+
         t_sent = time.monotonic()
         self.logger.info(json.dumps({
             "event": "tool_call.result_sent",
