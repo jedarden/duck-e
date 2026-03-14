@@ -1,0 +1,33 @@
+# Gitleaks configuration for DUCK-E
+# https://github.com/gitleaks/gitleaks
+
+title = "DUCK-E Gitleaks Configuration"
+
+[extend]
+# Extend the default gitleaks ruleset
+useDefault = true
+
+[allowlist]
+description = "Allowlisted patterns for documentation templates and examples"
+
+# Allow placeholder/example values in documentation files
+[[allowlist.regexes]]
+description = "Template placeholder passwords (e.g., 'changeme') in documentation"
+regex = '''(?i)(password|passwd|pwd).*[:=]["']?(changeme|change_me|change-me|placeholder|example|your[_-]?password|<password>|\$\{[A-Z_]+:-changeme\})'''
+
+[[allowlist.paths]]
+description = "Security documentation templates"
+regex = '''docs/security/.*'''
+
+[[allowlist.paths]]
+description = "Example environment files"
+regex = '''.*\.env\.example'''
+
+[[allowlist.paths]]
+description = "Test fixtures"
+regex = '''tests?/.*fixtures?/.*'''
+
+[[allowlist.commits]]
+# Allow the original security hardening commit (contains only template values)
+description = "Initial security hardening release with template credentials"
+regex = '''1381b27'''
