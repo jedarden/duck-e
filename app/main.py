@@ -7,6 +7,7 @@ import openai
 from openai import OpenAI
 from pathlib import Path
 from typing import Annotated
+import asyncio
 import httpx
 import json
 import meilisearch
@@ -470,10 +471,11 @@ async def handle_media_stream(websocket: WebSocket):
         }
     )
 
-    def web_search(query: Annotated[str, "search_query"]) -> str:
+    async def web_search(query: Annotated[str, "search_query"]) -> str:
         """
         Search the web using OpenAI's Responses API with web_search tool.
         Returns current information with sourced citations.
+        Runs the blocking SDK call in a thread to avoid blocking the event loop.
         """
         try:
             validated_query = SearchQuery(query=query)
@@ -483,26 +485,30 @@ async def handle_media_stream(websocket: WebSocket):
             logger.info(json.dumps({"event": "web_search.request_sent", "query": safe_query,
                                     "ts": time.time()}))
 
-            response = openai_client.responses.create(
+            response = await asyncio.to_thread(
+                openai_client.responses.create,
                 model="gpt-4o-mini",
                 tools=[{"type": "web_search_preview"}],
-                input=safe_query
+                input=safe_query,
             )
 
             t_response = time.monotonic()
+            duration_ms = round((t_response - t_request) * 1000, 1)
 
             if hasattr(response, 'output_text') and response.output_text:
                 result_text = response.output_text
-                if len(result_text) > 500:
-                    result_text = result_text[:500] + "..."
+                full_size = len(result_text)
+                if full_size > 2000:
+                    result_text = result_text[:2000] + "..."
                 logger.info(json.dumps({"event": "web_search.response_received", "query": safe_query,
+                                        "full_size": full_size,
                                         "result_size": len(result_text),
-                                        "duration_ms": round((t_response - t_request) * 1000, 1),
+                                        "duration_ms": duration_ms,
                                         "ts": time.time()}))
                 return result_text
             else:
                 logger.warning(json.dumps({"event": "web_search.empty_response", "query": safe_query,
-                                           "duration_ms": round((t_response - t_request) * 1000, 1),
+                                           "duration_ms": duration_ms,
                                            "ts": time.time()}))
                 return "I couldn't find relevant information. Please try a different query."
 
