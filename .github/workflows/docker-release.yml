@@ -3,7 +3,7 @@ name: Build and Release Docker Image
 on:
   push:
     branches:
-      - master
+      - main
   workflow_dispatch:
 
 env:
@@ -80,7 +80,7 @@ jobs:
           git add VERSION
           git commit -m "chore: bump version to $VERSION [skip ci]"
           git tag "v$VERSION"
-          git push origin master --tags
+          git push origin main --tags
 
       - name: Tag release (if VERSION was explicit)
         if: steps.version.outputs.bumped == 'false'
