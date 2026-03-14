@@ -20,7 +20,7 @@ from typing import Optional
 
 
 # Test Configuration
-TEST_SECRET_KEY = "test-secret-key-for-jwt-validation-only"
+TEST_SECRET_KEY = "test-secret-key-for-jwt-validation-only"  # pragma: allowlist secret
 TEST_ALGORITHM = "HS256"
 TEST_ACCESS_TOKEN_EXPIRE_MINUTES = 120
 TEST_REFRESH_TOKEN_EXPIRE_DAYS = 7
@@ -220,7 +220,7 @@ class TestMalformedTokenRejection:
         from app.middleware.auth import validate_token
 
         # Create token with different secret
-        wrong_secret = "wrong-secret-key"
+        wrong_secret = "wrong-secret-key"  # pragma: allowlist secret
         payload = {
             "sub": "attacker",
             "tier": "enterprise",  # Trying to fake enterprise tier
