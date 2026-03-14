@@ -374,7 +374,7 @@ class TestErrorHandling:
         handler = SafeErrorHandler()
 
         try:
-            raise Exception("SQL error: SELECT * FROM users WHERE password='secret123'")
+            raise Exception("SQL error: SELECT * FROM users WHERE password='secret123'")  # pragma: allowlist secret
         except Exception as e:
             response = await handler.handle_error(e)
 
