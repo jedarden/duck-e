@@ -371,6 +371,21 @@ async def handle_media_stream(websocket: WebSocket):
         await websocket.close(code=1011, reason="Agent initialization failed")
         return
 
+    def _geocode_location(safe_location: str):
+        """Geocode a city name to lat/lon using Open-Meteo geocoding API."""
+        geo_response = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": safe_location, "count": 1, "language": "en", "format": "json"},
+            timeout=10
+        )
+        geo_response.raise_for_status()
+        geo_data = geo_response.json()
+        results = geo_data.get("results")
+        if not results:
+            return None, None, None
+        result = results[0]
+        return result["latitude"], result["longitude"], result.get("timezone", "auto")
+
     def get_current_weather(location: Annotated[str, "city"]) -> str:
         """
         Get current weather with validated and sanitized location input.
@@ -382,12 +397,19 @@ async def handle_media_stream(websocket: WebSocket):
 
             logger.info(f"<-- Calling get_current_weather function for {safe_location} -->")
 
+            lat, lon, timezone = _geocode_location(safe_location)
+            if lat is None:
+                return json.dumps({"error": f"Location not found: {safe_location}"})
+
             response = requests.get(
-                "https://api.weatherapi.com/v1/current.json",
+                "https://api.open-meteo.com/v1/forecast",
                 params={
-                    "key": os.getenv('WEATHER_API_KEY'),
-                    "q": safe_location,
-                    "aqi": "no"
+                    "latitude": lat,
+                    "longitude": lon,
+                    "current": "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m",
+                    "temperature_unit": "celsius",
+                    "wind_speed_unit": "kmh",
+                    "timezone": timezone or "auto",
                 },
                 timeout=10
             )
@@ -431,14 +453,20 @@ async def handle_media_stream(websocket: WebSocket):
 
             logger.info(f"<-- Calling get_weather_forecast function for {safe_location} -->")
 
+            lat, lon, timezone = _geocode_location(safe_location)
+            if lat is None:
+                return json.dumps({"error": f"Location not found: {safe_location}"})
+
             response = requests.get(
-                "https://api.weatherapi.com/v1/forecast.json",
+                "https://api.open-meteo.com/v1/forecast",
                 params={
-                    "key": os.getenv('WEATHER_API_KEY'),
-                    "q": safe_location,
-                    "days": "3",
-                    "aqi": "no",
-                    "alerts": "no"
+                    "latitude": lat,
+                    "longitude": lon,
+                    "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max",
+                    "temperature_unit": "celsius",
+                    "wind_speed_unit": "kmh",
+                    "timezone": timezone or "auto",
+                    "forecast_days": 3,
                 },
                 timeout=10
             )
