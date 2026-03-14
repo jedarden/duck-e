@@ -81,15 +81,18 @@ const updateCostDisplay = (totalCost, hourlyRate, costs, elapsedMs) => {
 
   panel.innerHTML = `
     <div class="cost-breakdown">
-      <div class="cost-row"><span>Session Duration</span><span>${duration}</span></div>
+      <div class="cost-summary-row">
+        <div class="cost-item"><span>Duration</span><span>${duration}</span></div>
+        <div class="cost-item"><span>Session Total</span><span>${fmt(totalCost)}</span></div>
+      </div>
       <hr class="cost-divider">
-      <div class="cost-row"><span>Audio Input</span><span>${fmt(costs.audioInput)}</span></div>
-      <div class="cost-row"><span>Audio Output</span><span>${fmt(costs.audioOutput)}</span></div>
-      <div class="cost-row"><span>Text Input</span><span>${fmt(costs.textInput)}</span></div>
-      <div class="cost-row"><span>Text Output</span><span>${fmt(costs.textOutput)}</span></div>
-      <div class="cost-row"><span>Cached Input</span><span>${fmt(costs.cached)}</span></div>
-      <hr class="cost-divider">
-      <div class="cost-row cost-total"><span>Session Total</span><span>${fmt(totalCost)}</span></div>
+      <div class="cost-grid">
+        <div class="cost-item"><span>Audio In</span><span class="cost-val">${fmt(costs.audioInput)}</span></div>
+        <div class="cost-item"><span>Audio Out</span><span class="cost-val">${fmt(costs.audioOutput)}</span></div>
+        <div class="cost-item"><span>Text In</span><span class="cost-val">${fmt(costs.textInput)}</span></div>
+        <div class="cost-item"><span>Text Out</span><span class="cost-val">${fmt(costs.textOutput)}</span></div>
+        <div class="cost-item"><span>Cached</span><span class="cost-val">${fmt(costs.cached)}</span></div>
+      </div>
     </div>
   `;
 

@@ -1322,31 +1322,56 @@
         }
 
         #cost-panel.open {
-            max-height: 300px;
-            padding: 16px 20px;
+            max-height: 160px;
+            padding: 12px 20px;
         }
 
         .cost-breakdown {
             font-size: 0.8rem;
         }
 
-        .cost-row {
+        .cost-summary-row {
             display: flex;
             justify-content: space-between;
-            gap: 16px;
-            padding: 3px 0;
+            gap: 24px;
+            padding: 2px 0 6px;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .cost-summary-row .cost-item {
+            display: flex;
+            gap: 6px;
+        }
+
+        .cost-summary-row .cost-item span:first-child {
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        .cost-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2px 12px;
+            padding: 6px 0 2px;
+        }
+
+        .cost-item {
+            display: flex;
+            justify-content: space-between;
+            gap: 6px;
+            padding: 2px 0;
             color: var(--text-muted);
         }
 
-        .cost-row.cost-total {
-            font-weight: 600;
+        .cost-item .cost-val {
             color: var(--text-secondary);
         }
 
         .cost-divider {
             border: none;
             border-top: 1px solid var(--border);
-            margin: 6px 0;
+            margin: 4px 0;
         }
 
         @keyframes costFlash {
