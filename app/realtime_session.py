@@ -135,11 +135,18 @@ class RealtimeSession:
                             "content": [
                                 {
                                     "type": "input_text",
-                                    "text": f"(Voice was just changed to {voice})",
+                                    "text": (
+                                        f"(System: The voice was just changed to {voice}. "
+                                        f"Briefly confirm this to the user in one short sentence, "
+                                        f"e.g. 'Voice changed to {voice}.')"
+                                    ),
                                 }
                             ],
                         },
-                    }
+                    },
+                    {
+                        "type": "response.create",
+                    },
                 ],
             })
             return f"Voice changed to {voice}. Reinitialising session with new voice."
