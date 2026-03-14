@@ -99,6 +99,57 @@ const updateCostDisplay = (totalCost, hourlyRate, costs, elapsedMs) => {
   el.classList.add('cost-flash');
 };
 
+// Performance timeline tracking
+let perfTimeline = null;
+
+const perfReset = () => {
+  perfTimeline = {
+    speechStarted: null,
+    speechStopped: null,
+    transcriptionDone: null,
+    responseCreated: null,
+    // tool calls: map from call_id -> { dispatched, resultReceived }
+    toolCalls: {},
+    responseDone: null,
+  };
+};
+
+const perfTs = () => performance.now();
+
+const perfLogSummary = () => {
+  if (!perfTimeline) return;
+  const p = perfTimeline;
+  const fmt = (ms) => ms != null ? (ms / 1000).toFixed(2) + 's' : '?';
+  const delta = (a, b) => (a != null && b != null) ? b - a : null;
+
+  const speechDur = delta(p.speechStarted, p.speechStopped);
+  const transcriptionDur = delta(p.speechStopped, p.transcriptionDone);
+  const thinkingDur = delta(p.transcriptionDone ?? p.speechStopped, p.responseCreated);
+
+  const toolSummaries = Object.entries(p.toolCalls).map(([id, tc]) => {
+    const dur = delta(tc.dispatched, tc.resultReceived);
+    return `tool_call(${tc.name ?? id}): ${fmt(dur)}`;
+  });
+
+  const responseDur = (() => {
+    const afterTools = Object.values(p.toolCalls).map(tc => tc.resultReceived).filter(Boolean);
+    const start = afterTools.length > 0 ? Math.max(...afterTools) : p.responseCreated;
+    return delta(start, p.responseDone);
+  })();
+
+  const total = delta(p.speechStarted ?? p.responseCreated, p.responseDone);
+
+  const parts = [
+    `speech: ${fmt(speechDur)}`,
+    `transcription: ${fmt(transcriptionDur)}`,
+    `thinking: ${fmt(thinkingDur)}`,
+    ...toolSummaries,
+    `response: ${fmt(responseDur)}`,
+    `total: ${fmt(total)}`,
+  ];
+  console.log(`[DUCK-E Perf] ${parts.join(', ')}`);
+};
+
 // Configure marked for safe rendering
 if (typeof marked !== 'undefined') {
   marked.setOptions({
@@ -529,6 +580,50 @@ const handleWebRTCMessage = (event) => {
   try {
     // event now has { data: string, message: object } from our modified ag2client
     const data = event.message || (typeof event.data === 'string' ? JSON.parse(event.data) : event.data);
+
+    // Perf telemetry hooks
+    if (data.type === 'input_audio_buffer.speech_started') {
+      perfReset();
+      perfTimeline.speechStarted = perfTs();
+      console.log(`[DUCK-E Perf] speech_started ts=${perfTimeline.speechStarted.toFixed(0)}ms`);
+    } else if (data.type === 'input_audio_buffer.speech_stopped') {
+      if (perfTimeline) {
+        perfTimeline.speechStopped = perfTs();
+        const delta = perfTimeline.speechStopped - (perfTimeline.speechStarted ?? perfTimeline.speechStopped);
+        console.log(`[DUCK-E Perf] speech_stopped  speech_dur=${delta.toFixed(0)}ms`);
+      }
+    } else if (data.type === 'conversation.item.input_audio_transcription.completed') {
+      if (perfTimeline) {
+        perfTimeline.transcriptionDone = perfTs();
+        const start = perfTimeline.speechStopped ?? perfTimeline.speechStarted;
+        const delta = start != null ? perfTimeline.transcriptionDone - start : null;
+        console.log(`[DUCK-E Perf] transcription_done  transcription_dur=${delta != null ? delta.toFixed(0) : '?'}ms`);
+      }
+    } else if (data.type === 'response.created') {
+      if (!perfTimeline) perfReset();
+      perfTimeline.responseCreated = perfTs();
+      console.log(`[DUCK-E Perf] response.created ts=${perfTimeline.responseCreated.toFixed(0)}ms`);
+    } else if (data.type === 'response.function_call_arguments.done') {
+      if (perfTimeline) {
+        const callId = data.call_id;
+        perfTimeline.toolCalls[callId] = { name: data.name, dispatched: perfTs(), resultReceived: null };
+        console.log(`[DUCK-E Perf] tool_dispatched  tool=${data.name} call_id=${callId}`);
+      }
+    } else if (data.type === 'response.output_item.done') {
+      if (perfTimeline && data.item?.type === 'function_call') {
+        const callId = data.item.call_id;
+        if (perfTimeline.toolCalls[callId]) {
+          perfTimeline.toolCalls[callId].resultReceived = perfTs();
+          const dur = perfTimeline.toolCalls[callId].resultReceived - perfTimeline.toolCalls[callId].dispatched;
+          console.log(`[DUCK-E Perf] tool_result_received  tool=${data.item.name} call_id=${callId} dur=${dur.toFixed(0)}ms`);
+        }
+      }
+    } else if (data.type === 'response.done') {
+      if (perfTimeline) {
+        perfTimeline.responseDone = perfTs();
+        perfLogSummary();
+      }
+    }
 
     // Log message types for debugging (can be removed later)
     if (data.type) {

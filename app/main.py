@@ -12,6 +12,7 @@ import json
 import meilisearch
 import os
 import requests
+import time
 import uuid
 
 # Import configuration module for automatic OAI_CONFIG_LIST generation
@@ -210,14 +211,28 @@ async def handle_media_stream(websocket: WebSocket):
     # Retrieve and log incoming headers
     headers = websocket.headers
     logger = getLogger("uvicorn.error")
-    logger.info(f"Incoming WebSocket headers: {headers}")
     logger.info(f"Session ID for cost tracking: {session_id}")
+
+    # Log all headers for auth proxy debugging
+    header_dict = dict(headers)
+    auth_relevant = {k: v for k, v in header_dict.items()
+                     if any(k.lower().startswith(p) for p in ('x-forward', 'x-real', 'cookie', 'authorization'))}
+    logger.info(json.dumps({"event": "ws.connect", "session_id": session_id,
+                            "auth_headers": auth_relevant, "ts": time.time()}))
 
     # Extract user identity from OAuth proxy headers
     forwarded_user = headers.get('x-forwarded-user', '')
     forwarded_email = headers.get('x-forwarded-email', '')
     forwarded_name = headers.get('x-forwarded-name', '')
-    logger.info(f"User identity: user={forwarded_user} email={forwarded_email} name={forwarded_name}")
+
+    # If standard headers are missing, note which auth headers ARE present for debugging
+    if not forwarded_user and not forwarded_email:
+        present = [k for k in header_dict if k.lower().startswith('x-forward') or 'cookie' in k.lower()]
+        logger.info(json.dumps({"event": "ws.auth_missing", "session_id": session_id,
+                                "present_auth_headers": present, "ts": time.time()}))
+    logger.info(json.dumps({"event": "ws.user_identity", "session_id": session_id,
+                            "user": forwarded_user, "email": forwarded_email,
+                            "name": forwarded_name, "ts": time.time()}))
 
     # Load per-user memory (keyed by email if available, else user id)
     user_identity = forwarded_email or forwarded_user
@@ -464,7 +479,9 @@ async def handle_media_stream(websocket: WebSocket):
             validated_query = SearchQuery(query=query)
             safe_query = validated_query.query
 
-            logger.info(f"<-- Executing OpenAI web search for query: {safe_query} -->")
+            t_request = time.monotonic()
+            logger.info(json.dumps({"event": "web_search.request_sent", "query": safe_query,
+                                    "ts": time.time()}))
 
             response = openai_client.responses.create(
                 model="gpt-4o-mini",
@@ -472,14 +489,21 @@ async def handle_media_stream(websocket: WebSocket):
                 input=safe_query
             )
 
+            t_response = time.monotonic()
+
             if hasattr(response, 'output_text') and response.output_text:
                 result_text = response.output_text
                 if len(result_text) > 500:
                     result_text = result_text[:500] + "..."
-                logger.info(f"Web search returned {len(result_text)} characters")
+                logger.info(json.dumps({"event": "web_search.response_received", "query": safe_query,
+                                        "result_size": len(result_text),
+                                        "duration_ms": round((t_response - t_request) * 1000, 1),
+                                        "ts": time.time()}))
                 return result_text
             else:
-                logger.warning("No output_text in web search response")
+                logger.warning(json.dumps({"event": "web_search.empty_response", "query": safe_query,
+                                           "duration_ms": round((t_response - t_request) * 1000, 1),
+                                           "ts": time.time()}))
                 return "I couldn't find relevant information. Please try a different query."
 
         except ValidationError as e:

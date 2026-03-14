@@ -6,6 +6,7 @@ Supports voice change via WebRTC session teardown and reinit.
 import asyncio
 import httpx
 import json
+import time
 from logging import Logger, getLogger
 from typing import Any, Callable, Optional
 
@@ -190,6 +191,14 @@ class RealtimeSession:
         """Execute a registered tool and send the result back to the client."""
         name = data.get("name")
         call_id = data.get("call_id")
+        t_received = time.monotonic()
+
+        self.logger.info(json.dumps({
+            "event": "tool_call.received",
+            "tool": name,
+            "call_id": call_id,
+            "ts": time.time(),
+        }))
 
         try:
             args = json.loads(data.get("arguments", "{}"))
@@ -201,6 +210,15 @@ class RealtimeSession:
             self.logger.warning(f"No handler registered for tool: {name}")
             return
 
+        self.logger.info(json.dumps({
+            "event": "tool_call.handler_start",
+            "tool": name,
+            "call_id": call_id,
+            "args": args,
+            "ts": time.time(),
+        }))
+        t_handler_start = time.monotonic()
+
         try:
             if asyncio.iscoroutinefunction(handler):
                 result = await handler(**args)
@@ -210,11 +228,32 @@ class RealtimeSession:
             self.logger.error(f"Tool handler error for '{name}': {e}", exc_info=True)
             result = f"Error executing tool: {str(e)}"
 
+        t_handler_end = time.monotonic()
+        result_str = str(result)
+        self.logger.info(json.dumps({
+            "event": "tool_call.handler_done",
+            "tool": name,
+            "call_id": call_id,
+            "result_size": len(result_str),
+            "handler_duration_ms": round((t_handler_end - t_handler_start) * 1000, 1),
+            "ts": time.time(),
+        }))
+
         await self.websocket.send_json({
             "type": "conversation.item.create",
             "item": {
                 "type": "function_call_output",
                 "call_id": call_id,
-                "output": str(result),
+                "output": result_str,
             },
         })
+
+        t_sent = time.monotonic()
+        self.logger.info(json.dumps({
+            "event": "tool_call.result_sent",
+            "tool": name,
+            "call_id": call_id,
+            "result_size": len(result_str),
+            "total_duration_ms": round((t_sent - t_received) * 1000, 1),
+            "ts": time.time(),
+        }))
