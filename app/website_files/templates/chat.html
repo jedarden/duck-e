@@ -90,7 +90,6 @@
             display: flex;
             flex-direction: column;
             height: 100vh;
-            overflow: hidden;
         }
 
         /* Header */
@@ -579,13 +578,14 @@
                 flex-direction: column;
                 flex: 1;
                 min-height: 0;
-                overflow-y: auto;
                 border-radius: 20px 20px 0 0;
                 padding-bottom: 0; /* Remove bottom padding so content stretches to edge */
             }
 
             .main-content.has-history .transcript-content {
                 flex: 1;
+                min-height: 0;
+                overflow-y: auto;
                 max-height: none; /* Override base max-height: 300px */
                 border-radius: 12px 12px 0 0; /* Rounded top only */
                 margin: 0;
