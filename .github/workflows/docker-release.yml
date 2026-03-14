@@ -2,14 +2,9 @@ name: Build and Release Docker Image
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
+    branches:
+      - master
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., v0.1.0)'
-        required: true
-        default: 'v0.1.0'
 
 env:
   REGISTRY: ghcr.io
@@ -18,6 +13,8 @@ env:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    # Skip version-bump commits to prevent infinite loops
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     permissions:
       contents: write
       packages: write
@@ -26,6 +23,30 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Determine version
+        id: version
+        run: |
+          CURRENT_VERSION=$(cat VERSION)
+          echo "current=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+
+          # Check if VERSION was modified in this push
+          if git diff HEAD~1 --name-only | grep -q '^VERSION$'; then
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+            echo "VERSION was explicitly changed to $CURRENT_VERSION"
+          else
+            # Auto-bump patch version
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+            echo "$NEW_VERSION" > VERSION
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+            echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+            echo "Auto-bumped version: $CURRENT_VERSION -> $NEW_VERSION"
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -37,17 +58,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -55,104 +65,42 @@ jobs:
           file: ./dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Generate release notes
-        id: release_notes
+      - name: Push version bump and tag
+        if: steps.version.outputs.bumped == 'true'
         run: |
-          cat << 'EOF' > release_notes.md
-          ## 🦆 DUCK-E v${{ github.ref_name }}
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: bump version to $VERSION [skip ci]"
+          git tag "v$VERSION"
+          git push origin master --tags
 
-          ### What's New
-
-          DUCK-E (The Duck That Talks Back) is an AI-powered voice assistant that revolutionizes rubber duck debugging by actively engaging in your debugging process.
-
-          ### Features
-
-          - ✅ **Real-time Voice Interaction**: WebRTC-powered voice conversations using OpenAI's Realtime API
-          - ✅ **Intelligent Code Assistance**: Context-aware debugging help and suggestions
-          - ✅ **Web Search Integration**: Search for documentation and solutions in real-time
-          - ✅ **Weather Information**: Check weather while you debug
-          - ✅ **Multi-Agent Support**: Powered by AutoGen framework for complex tasks
-
-          ### Docker Usage
-
-          #### Pull the image:
-          ```bash
-          docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-          ```
-
-          #### Run the container:
-          ```bash
-          docker run -d \
-            -p 8000:8000 \
-            -e OPENAI_API_KEY=your_key_here \
-            -e WEATHER_API_KEY=your_weather_key \
-            -e OAI_CONFIG_LIST='[{"model":"gpt-5-mini","api_key":"your_key"},{"model":"gpt-realtime","api_key":"your_key","tags":["gpt-realtime"]}]' \
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-          ```
-
-          #### Using docker-compose:
-          ```yaml
-          version: '3.8'
-          services:
-            ducke:
-              image: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-              ports:
-                - "8000:8000"
-              environment:
-                - OPENAI_API_KEY=${OPENAI_API_KEY}
-                - WEATHER_API_KEY=${WEATHER_API_KEY}
-                - OAI_CONFIG_LIST=${OAI_CONFIG_LIST}
-          ```
-
-          ### Requirements
-
-          - OpenAI API key with access to GPT-5/Realtime models
-          - WeatherAPI key (free at https://www.weatherapi.com/)
-
-          ### Quick Start
-
-          1. Pull the container image
-          2. Set your API keys in environment variables
-          3. Run the container
-          4. Navigate to http://localhost:8000
-          5. Start talking to DUCK-E!
-
-          ### Tech Stack
-
-          - FastAPI + Uvicorn
-          - OpenAI Realtime API
-          - Microsoft AutoGen
-          - WebRTC for audio streaming
-          - Docker multi-platform support (amd64/arm64)
-
-          ### Documentation
-
-          Full documentation available at: https://github.com/${{ github.repository }}
-
-          ### Support
-
-          - 🐛 Report bugs: https://github.com/${{ github.repository }}/issues
-          - 💡 Request features: https://github.com/${{ github.repository }}/discussions
-          - 📖 Read docs: https://github.com/${{ github.repository }}#readme
-
-          ---
-
-          **The duck is ready to talk back! 🦆✨**
-          EOF
-          cat release_notes.md
+      - name: Tag release (if VERSION was explicit)
+        if: steps.version.outputs.bumped == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Only tag if this tag doesn't already exist
+          if ! git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag "v$VERSION"
+            git push origin "v$VERSION"
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
-          body_path: release_notes.md
+          tag_name: v${{ steps.version.outputs.version }}
+          name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
           draft: false
           prerelease: false
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
