@@ -89,7 +89,7 @@
             padding: 20px;
             display: flex;
             flex-direction: column;
-            height: 100vh;
+            min-height: 100vh;
         }
 
         /* Header */
@@ -155,6 +155,7 @@
         /* Main content */
         .main-content {
             flex: 1;
+            min-height: 0;
             display: flex;
             flex-direction: column;
             gap: 30px;
@@ -552,9 +553,14 @@
                 order: 4;
             }
 
-            /* When has history: grow naturally, footer scrolls below fold */
+            /* When has history: cap at viewport so transcript scrolls internally;
+               footer remains accessible by scrolling the page.
+               160px = 20px container padding-top + 80px logo + 60px header vertical padding */
             .main-content.has-history {
                 flex: 1;
+                min-height: 0;
+                max-height: calc(100vh - 160px);
+                overflow: hidden;
                 display: flex;
                 flex-direction: column;
                 gap: 0; /* Remove gap between transcript and controls */
