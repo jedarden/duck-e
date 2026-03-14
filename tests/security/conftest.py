@@ -8,7 +8,7 @@ from typing import Dict, Any
 
 
 # Test JWT configuration
-TEST_SECRET_KEY = "test-secret-key-for-jwt-validation-only"
+TEST_SECRET_KEY = "test-secret-key-for-jwt-validation-only"  # pragma: allowlist secret
 TEST_ALGORITHM = "HS256"
 
 
@@ -79,7 +79,7 @@ def token_with_invalid_signature():
         "tier": "enterprise",
         "exp": datetime.now(timezone.utc) + timedelta(hours=1)
     }
-    wrong_secret = "wrong-secret-key"
+    wrong_secret = "wrong-secret-key"  # pragma: allowlist secret
     return jwt.encode(payload, wrong_secret, algorithm=TEST_ALGORITHM)
 
 
