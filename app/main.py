@@ -386,10 +386,11 @@ async def handle_media_stream(websocket: WebSocket):
         result = results[0]
         return result["latitude"], result["longitude"], result.get("timezone", "auto")
 
-    def get_current_weather(location: Annotated[str, "city"]) -> str:
+    async def get_current_weather(location: Annotated[str, "city"]) -> str:
         """
         Get current weather with validated and sanitized location input.
         Security: Prevents SQL injection, command injection, XSS, SSRF, URL injection
+        Runs blocking HTTP requests in a thread to avoid blocking the event loop.
         """
         try:
             validated_location = LocationInput(location=location)
@@ -397,11 +398,12 @@ async def handle_media_stream(websocket: WebSocket):
 
             logger.info(f"<-- Calling get_current_weather function for {safe_location} -->")
 
-            lat, lon, timezone = _geocode_location(safe_location)
+            lat, lon, timezone = await asyncio.to_thread(_geocode_location, safe_location)
             if lat is None:
                 return json.dumps({"error": f"Location not found: {safe_location}"})
 
-            response = requests.get(
+            response = await asyncio.to_thread(
+                requests.get,
                 "https://api.open-meteo.com/v1/forecast",
                 params={
                     "latitude": lat,
@@ -411,7 +413,7 @@ async def handle_media_stream(websocket: WebSocket):
                     "wind_speed_unit": "kmh",
                     "timezone": timezone or "auto",
                 },
-                timeout=10
+                timeout=10,
             )
 
             if response.status_code == 200:
@@ -442,10 +444,11 @@ async def handle_media_stream(websocket: WebSocket):
         }
     )
 
-    def get_weather_forecast(location: Annotated[str, "city"]) -> str:
+    async def get_weather_forecast(location: Annotated[str, "city"]) -> str:
         """
         Get weather forecast with validated and sanitized location input.
         Security: Prevents SQL injection, command injection, XSS, SSRF, URL injection
+        Runs blocking HTTP requests in a thread to avoid blocking the event loop.
         """
         try:
             validated_location = LocationInput(location=location)
@@ -453,11 +456,12 @@ async def handle_media_stream(websocket: WebSocket):
 
             logger.info(f"<-- Calling get_weather_forecast function for {safe_location} -->")
 
-            lat, lon, timezone = _geocode_location(safe_location)
+            lat, lon, timezone = await asyncio.to_thread(_geocode_location, safe_location)
             if lat is None:
                 return json.dumps({"error": f"Location not found: {safe_location}"})
 
-            response = requests.get(
+            response = await asyncio.to_thread(
+                requests.get,
                 "https://api.open-meteo.com/v1/forecast",
                 params={
                     "latitude": lat,
@@ -468,7 +472,7 @@ async def handle_media_stream(websocket: WebSocket):
                     "timezone": timezone or "auto",
                     "forecast_days": 3,
                 },
-                timeout=10
+                timeout=10,
             )
 
             if response.status_code == 200:
