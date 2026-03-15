@@ -413,7 +413,7 @@ class TestErrorHandling:
         with patch('logging.Logger.error') as mock_log:
             try:
                 # Simulate error with API key
-                os.environ['TEMP_API_KEY'] = 'sk-super-secret-key-12345'
+                os.environ['TEMP_API_KEY'] = 'sk-super-secret-key-12345'  # pragma: allowlist secret
                 raise Exception(f"API call failed with key {os.environ['TEMP_API_KEY']}")
             except Exception as e:
                 await handler.handle_error(e)
@@ -664,7 +664,7 @@ class TestLoggingAndMonitoring:
             await logger.log_request(
                 path="/api/login",
                 headers={"Authorization": "Bearer sk-secret-token"},
-                body={"username": "admin", "password": "secret123"}
+                body={"username": "admin", "password": "secret123"}  # pragma: allowlist secret
             )
 
             logged_content = str(mock_log.call_args)
