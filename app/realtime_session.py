@@ -99,14 +99,14 @@ class RealtimeSession:
 
     async def change_voice(self, voice: str) -> str:
         """
-        Change the assistant's voice by reinitialising the WebRTC session.
+        Change the assistant's voice by sending a session.update event.
 
-        Generates a new ephemeral key with the requested voice and sends a
-        ducke.reinit message to the client.  The client tears down the old
-        RTCPeerConnection and establishes a new one using the new config.
+        Uses the OpenAI Realtime API's session.update event to change the voice
+        without needing to regenerate ephemeral keys or tear down the WebRTC
+        connection. This is faster and more reliable than the old reinit approach.
+
         The function_call_output reply (sent by _handle_tool_call after this
-        returns) will be queued by the client and replayed once the new data
-        channel opens, so DUCK-E will speak the confirmation in the new voice.
+        returns) will be spoken by DUCK-E in the new voice.
         """
         if voice not in AVAILABLE_VOICES:
             return (
@@ -117,15 +117,22 @@ class RealtimeSession:
         try:
             self.logger.info(f"Changing voice to: {voice}")
             self.voice = voice
-            session_data = await self._get_ephemeral_key(voice=voice)
 
-            # Send ducke.reinit to the client.
-            # The init list injects a context note into the new session so
-            # DUCK-E knows the voice just changed.
+            # Send a session.update event to change the voice.
+            # This uses the OpenAI Realtime API's GA format which supports
+            # dynamic voice changes via session.update without reinitializing.
             await self.websocket.send_json({
-                "type": "ducke.reinit",
-                "voice": voice,
-                "config": session_data,
+                "type": "ducke.session_update",
+                "update": {
+                    "type": "session.update",
+                    "session": {
+                        "type": "realtime",
+                        "audio": {
+                            "output": {"voice": voice},
+                        },
+                    },
+                },
+                # Inject a context note so DUCK-E knows to confirm the voice change
                 "init": [
                     {
                         "type": "conversation.item.create",
@@ -149,7 +156,7 @@ class RealtimeSession:
                     },
                 ],
             })
-            return f"Voice changed to {voice}. Reinitialising session with new voice."
+            return f"Voice changed to {voice}."
         except Exception as e:
             self.logger.error(f"Failed to change voice: {e}", exc_info=True)
             return f"Failed to change voice: {str(e)}"
