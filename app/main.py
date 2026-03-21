@@ -526,7 +526,7 @@ async def handle_media_stream(websocket: WebSocket):
 
             response = await asyncio.to_thread(
                 openai_client.responses.create,
-                model="gpt-4o-mini",
+                model="gpt-5.4-nano",
                 tools=[{"type": "web_search_preview"}],
                 input=safe_query,
             )
