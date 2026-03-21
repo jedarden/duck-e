@@ -76,7 +76,7 @@ class UserMemoryStore:
         """
         Extract memorable facts from a conversation turn and save them.
 
-        Calls gpt-4o-mini with a focused extraction prompt to identify user-specific
+        Calls gpt-5.4-nano with a focused extraction prompt to identify user-specific
         facts worth persisting (location, preferences, interests, personal details).
         Fire-and-forget safe — all errors are suppressed to avoid disrupting the session.
         """
@@ -102,7 +102,7 @@ class UserMemoryStore:
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "gpt-4o-mini",
+                        "model": "gpt-5.4-nano",
                         "messages": [
                             {"role": "system", "content": prompt},
                             {"role": "user", "content": turn},

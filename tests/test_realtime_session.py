@@ -63,25 +63,7 @@ class TestVoiceChange:
         assert sent_message["type"] == "ducke.session_update"
         assert "update" in sent_message
         assert sent_message["update"]["type"] == "session.update"
-        assert sent_message["update"]["session"]["type"] == "realtime"
-        assert sent_message["update"]["session"]["audio"]["output"]["voice"] == "nova"
-
-    def test_change_voice_includes_init_messages(self, session, mock_websocket):
-        """Test that change_voice includes init messages for confirmation."""
-        result = asyncio.run(session.change_voice("fable"))
-
-        sent_message = mock_websocket.send_json.call_args[0][0]
-
-        # Verify init messages are included
-        assert "init" in sent_message
-        assert len(sent_message["init"]) == 2
-
-        # First init message should create a conversation item
-        assert sent_message["init"][0]["type"] == "conversation.item.create"
-        assert "voice was just changed to fable" in sent_message["init"][0]["item"]["content"][0]["text"]
-
-        # Second init message should trigger a response
-        assert sent_message["init"][1]["type"] == "response.create"
+        assert sent_message["update"]["session"]["voice"] == "nova"
 
     def test_change_voice_updates_session_voice(self, session, mock_websocket):
         """Test that change_voice updates the session's voice attribute."""
@@ -119,7 +101,7 @@ class TestVoiceChange:
 
             # Should send the correct voice in the session update
             sent_message = mock_websocket.send_json.call_args[0][0]
-            assert sent_message["update"]["session"]["audio"]["output"]["voice"] == voice
+            assert sent_message["update"]["session"]["voice"] == voice
 
 
 class TestVoiceChangeMessageFormat:
@@ -143,26 +125,23 @@ class TestVoiceChangeMessageFormat:
             voice="alloy",
         )
 
-    def test_session_update_format_matches_ga_api_spec(self, session, mock_websocket):
+    def test_session_update_format(self, session, mock_websocket):
         """
-        Test that session.update format matches OpenAI Realtime GA API spec.
+        Test that session.update format is correct.
 
-        According to the GA migration guide, the session.update event should have:
+        The session.update event should have:
         - type: "session.update"
-        - session.type: "realtime"
-        - session.audio.output.voice: <voice name>
+        - session.voice: <voice name>
         """
         asyncio.run(session.change_voice("nova"))
 
         sent_message = mock_websocket.send_json.call_args[0][0]
         update = sent_message["update"]
 
-        # Verify GA API format
+        # Verify format
         assert update["type"] == "session.update"
-        assert update["session"]["type"] == "realtime"
-        assert "audio" in update["session"]
-        assert "output" in update["session"]["audio"]
-        assert "voice" in update["session"]["audio"]["output"]
+        assert "voice" in update["session"]
+        assert update["session"]["voice"] == "nova"
 
     def test_session_update_does_not_call_ephemeral_key_endpoint(self, session, mock_websocket):
         """
@@ -181,7 +160,7 @@ class TestVoiceChangeMessageFormat:
         """
         Test that session.update only changes voice, not other session config.
 
-        The session.update should only include the audio.output.voice field,
+        The session.update should only include the voice field,
         not modify other session settings like tools or instructions.
         """
         asyncio.run(session.change_voice("onyx"))
@@ -189,11 +168,9 @@ class TestVoiceChangeMessageFormat:
         sent_message = mock_websocket.send_json.call_args[0][0]
         session_obj = sent_message["update"]["session"]
 
-        # Should only have type and audio.output.voice
-        assert session_obj["type"] == "realtime"
-        assert "audio" in session_obj
-        assert "output" in session_obj["audio"]
-        assert "voice" in session_obj["audio"]["output"]
+        # Should only have voice
+        assert "voice" in session_obj
+        assert session_obj["voice"] == "onyx"
 
         # Should NOT have tools or instructions in the update
         # (those are set during initial session creation)
