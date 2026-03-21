@@ -74,6 +74,7 @@ class UserMemoryStore:
         api_key: str,
         cost_tracker=None,
         session_id: str | None = None,
+        on_backend_cost=None,
     ) -> None:
         """
         Extract memorable facts from a conversation turn and save them.
@@ -129,6 +130,15 @@ class UserMemoryStore:
                             )
                         except Exception:
                             pass  # Never crash the session over cost tracking
+                        if on_backend_cost is not None:
+                            try:
+                                await on_backend_cost(
+                                    "gpt-5.4-nano",
+                                    usage.get("prompt_tokens", 0),
+                                    usage.get("completion_tokens", 0),
+                                )
+                            except Exception:
+                                pass
 
                 content = data["choices"][0]["message"]["content"].strip()
                 facts = json.loads(content)

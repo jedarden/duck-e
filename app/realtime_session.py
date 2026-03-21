@@ -185,6 +185,18 @@ class RealtimeSession:
         except Exception as e:
             self.logger.error(f"Session error: {e}", exc_info=True)
 
+    async def send_backend_cost(self, model: str, input_tokens: int, output_tokens: int) -> None:
+        """Relay backend API cost data to the browser client."""
+        try:
+            await self.websocket.send_json({
+                "type": "ducke.backend_cost",
+                "model": model,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            })
+        except Exception:
+            pass  # Never crash the session over cost relay
+
     async def _handle_tool_call(self, data: dict[str, Any]) -> None:
         """Execute a registered tool and send the result back to the client."""
         name = data.get("name")

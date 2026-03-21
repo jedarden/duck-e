@@ -352,6 +352,7 @@ async def handle_media_stream(websocket: WebSocket):
                 await memory_store.extract_and_save(
                     user_text, assistant_text, _extraction_api_key,
                     cost_tracker=cost_tracker, session_id=session_id,
+                    on_backend_cost=session.send_backend_cost,
                 )
 
         session = RealtimeSession(
@@ -548,6 +549,14 @@ async def handle_media_stream(websocket: WebSocket):
                     )
                 except Exception:
                     pass  # Never crash the session over cost tracking
+                try:
+                    await session.send_backend_cost(
+                        "gpt-5.4-nano",
+                        response.usage.input_tokens,
+                        response.usage.output_tokens,
+                    )
+                except Exception:
+                    pass
 
             if hasattr(response, 'output_text') and response.output_text:
                 result_text = response.output_text

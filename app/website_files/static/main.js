@@ -7,7 +7,7 @@ let streamingResponse = null; // Track current streaming response { index, conte
 let currentTurnUserTranscript = ''; // Last user utterance for memory extraction
 let currentTurnAssistantTranscript = ''; // Current assistant response for memory extraction
 
-// Cost tracking state (gpt-realtime-1.5)
+// Cost tracking state (gpt-realtime-1.5 + backend APIs)
 let sessionCost = {
   startTime: null,
   totalInputTextTokens: 0,
@@ -15,15 +15,51 @@ let sessionCost = {
   totalOutputTextTokens: 0,
   totalOutputAudioTokens: 0,
   totalCachedTokens: 0,
+  backendInputTokens: 0,   // gpt-5.4-nano (web_search, memory extraction)
+  backendOutputTokens: 0,
 };
 
 // Pricing constants for gpt-realtime-1.5 (per token)
 const PRICING = {
-  textInput:   4.00  / 1_000_000,
-  textOutput:  16.00 / 1_000_000,
-  audioInput:  32.00 / 1_000_000,
-  audioOutput: 64.00 / 1_000_000,
-  cachedInput: 0.40  / 1_000_000,
+  textInput:     4.00 / 1_000_000,
+  textOutput:   16.00 / 1_000_000,
+  audioInput:   32.00 / 1_000_000,
+  audioOutput:  64.00 / 1_000_000,
+  cachedInput:   0.40 / 1_000_000,
+  // gpt-5.4-nano (web_search, memory extraction)
+  backendInput:  0.20 / 1_000_000,
+  backendOutput: 1.25 / 1_000_000,
+};
+
+const refreshCostDisplay = () => {
+  if (!sessionCost.startTime) return;
+
+  const backendCost =
+    (sessionCost.backendInputTokens  * PRICING.backendInput)  +
+    (sessionCost.backendOutputTokens * PRICING.backendOutput);
+
+  const totalCost =
+    (sessionCost.totalInputTextTokens   * PRICING.textInput)   +
+    (sessionCost.totalInputAudioTokens  * PRICING.audioInput)  +
+    (sessionCost.totalOutputTextTokens  * PRICING.textOutput)  +
+    (sessionCost.totalOutputAudioTokens * PRICING.audioOutput) +
+    (sessionCost.totalCachedTokens      * PRICING.cachedInput) +
+    backendCost;
+
+  const elapsedMs = Date.now() - sessionCost.startTime;
+  const elapsedHours = elapsedMs / 3_600_000;
+  const hourlyRate = elapsedHours > 0 ? totalCost / elapsedHours : 0;
+
+  const costs = {
+    audioInput:  sessionCost.totalInputAudioTokens  * PRICING.audioInput,
+    audioOutput: sessionCost.totalOutputAudioTokens * PRICING.audioOutput,
+    textInput:   sessionCost.totalInputTextTokens   * PRICING.textInput,
+    textOutput:  sessionCost.totalOutputTextTokens  * PRICING.textOutput,
+    cached:      sessionCost.totalCachedTokens      * PRICING.cachedInput,
+    backend:     backendCost,
+  };
+
+  updateCostDisplay(totalCost, hourlyRate, costs, elapsedMs);
 };
 
 const updateCostFromResponse = (usage) => {
@@ -38,26 +74,7 @@ const updateCostFromResponse = (usage) => {
   sessionCost.totalOutputTextTokens   += outDetails.text_tokens  || 0;
   sessionCost.totalOutputAudioTokens  += outDetails.audio_tokens || 0;
 
-  const totalCost =
-    (sessionCost.totalInputTextTokens   * PRICING.textInput)   +
-    (sessionCost.totalInputAudioTokens  * PRICING.audioInput)  +
-    (sessionCost.totalOutputTextTokens  * PRICING.textOutput)  +
-    (sessionCost.totalOutputAudioTokens * PRICING.audioOutput) +
-    (sessionCost.totalCachedTokens      * PRICING.cachedInput);
-
-  const elapsedMs = Date.now() - sessionCost.startTime;
-  const elapsedHours = elapsedMs / 3_600_000;
-  const hourlyRate = elapsedHours > 0 ? totalCost / elapsedHours : 0;
-
-  const costs = {
-    audioInput:  sessionCost.totalInputAudioTokens  * PRICING.audioInput,
-    audioOutput: sessionCost.totalOutputAudioTokens * PRICING.audioOutput,
-    textInput:   sessionCost.totalInputTextTokens   * PRICING.textInput,
-    textOutput:  sessionCost.totalOutputTextTokens  * PRICING.textOutput,
-    cached:      sessionCost.totalCachedTokens      * PRICING.cachedInput,
-  };
-
-  updateCostDisplay(totalCost, hourlyRate, costs, elapsedMs);
+  refreshCostDisplay();
 };
 
 let costPanelListenerAttached = false;
@@ -94,6 +111,7 @@ const updateCostDisplay = (totalCost, hourlyRate, costs, elapsedMs) => {
         <div class="cost-item"><span>Text In</span><span class="cost-val">${fmt(costs.textInput)}</span></div>
         <div class="cost-item"><span>Text Out</span><span class="cost-val">${fmt(costs.textOutput)}</span></div>
         <div class="cost-item"><span>Cached</span><span class="cost-val">${fmt(costs.cached)}</span></div>
+        <div class="cost-item"><span>Backend</span><span class="cost-val">${fmt(costs.backend)}</span></div>
       </div>
     </div>
   `;
@@ -801,6 +819,13 @@ const handleWebRTCMessage = (event) => {
     else if (data.type === 'ducke.voice_changed') {
       const voice = data.voice || 'unknown';
       addTranscriptMessage('system', `Voice changed to ${voice}`);
+    }
+    // Backend API cost (web_search, memory extraction via gpt-5.4-nano)
+    else if (data.type === 'ducke.backend_cost') {
+      if (!sessionCost.startTime) sessionCost.startTime = Date.now();
+      sessionCost.backendInputTokens  += data.input_tokens  || 0;
+      sessionCost.backendOutputTokens += data.output_tokens || 0;
+      refreshCostDisplay();
     }
   } catch (e) {
     console.error('Error handling WebRTC message:', e);

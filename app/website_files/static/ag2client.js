@@ -406,6 +406,13 @@ var ag2client = (() => {
             );
             return;
           }
+          // Backend API cost event — forward to main.js, do NOT relay to OpenAI.
+          if (type === "ducke.backend_cost") {
+            if (this.onMessage) {
+              this.onMessage({ data: event.data, message: message });
+            }
+            return;
+          }
           // Voice change via session.update: send the update to OpenAI
           // without tearing down the WebRTC connection. This is faster and
           // more reliable than the old ducke.reinit approach.
