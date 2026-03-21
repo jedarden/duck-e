@@ -345,12 +345,19 @@ async def handle_media_stream(websocket: WebSocket):
         else:
             system_message = base_system_message
 
+        _extraction_api_key = first_config["api_key"]
+
+        async def _on_turn_done(user_text: str, assistant_text: str) -> None:
+            if memory_store is not None:
+                await memory_store.extract_and_save(user_text, assistant_text, _extraction_api_key)
+
         session = RealtimeSession(
             websocket=websocket,
             model=first_config["model"],
             api_key=first_config["api_key"],
             system_message=system_message,
             logger=logger,
+            on_turn_done=_on_turn_done if memory_store is not None else None,
         )
     except IndexError as e:
         error_msg = f"Configuration error: Failed to access config_list - {str(e)}"

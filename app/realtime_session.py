@@ -39,6 +39,7 @@ class RealtimeSession:
         system_message: str,
         voice: str = "alloy",
         logger: Optional[Logger] = None,
+        on_turn_done: Optional[Callable] = None,
     ):
         self.websocket = websocket
         self.model = model
@@ -48,6 +49,7 @@ class RealtimeSession:
         self.logger = logger or getLogger(__name__)
         self.tools: list[dict[str, Any]] = []
         self.tool_handlers: dict[str, Callable] = {}
+        self.on_turn_done = on_turn_done  # async (user_text, assistant_text) -> None
 
     def register_tool(
         self,
@@ -171,6 +173,13 @@ class RealtimeSession:
                 elif msg_type == "ducke.annotation":
                     annotation = data.get("annotation", {})
                     self.logger.info(f"Annotation received from client: {annotation}")
+                elif msg_type == "ducke.turn_done":
+                    if self.on_turn_done:
+                        user_text = data.get("user_text", "")
+                        assistant_text = data.get("assistant_text", "")
+                        asyncio.create_task(
+                            self.on_turn_done(user_text, assistant_text)
+                        )
         except WebSocketDisconnect:
             pass
         except Exception as e:

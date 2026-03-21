@@ -3,6 +3,7 @@ User memory store for DUCK-E.
 Persists per-user facts in JSON files under /data/memory/.
 """
 import hashlib
+import httpx
 import json
 import os
 from datetime import datetime, timezone
@@ -65,3 +66,57 @@ class UserMemoryStore:
     def get_facts(self) -> list[str]:
         """Return list of fact strings."""
         return [f["text"] for f in self._data.get("facts", [])]
+
+    async def extract_and_save(
+        self,
+        user_text: str,
+        assistant_text: str,
+        api_key: str,
+    ) -> None:
+        """
+        Extract memorable facts from a conversation turn and save them.
+
+        Calls gpt-4o-mini with a focused extraction prompt to identify user-specific
+        facts worth persisting (location, preferences, interests, personal details).
+        Fire-and-forget safe — all errors are suppressed to avoid disrupting the session.
+        """
+        if not user_text.strip():
+            return
+
+        prompt = (
+            "Extract facts about the USER worth remembering for future conversations. "
+            "Focus on: location, preferences, interests, personal details, goals. "
+            "Only extract facts about the USER — not information the assistant provided. "
+            "Return ONLY a valid JSON array of concise fact strings, e.g. "
+            '[\"User lives in Paris\", \"User prefers metric units\"]. '
+            "Return [] if nothing is worth saving."
+        )
+        turn = f"[User]: {user_text}\n[Assistant]: {assistant_text}"
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "gpt-4o-mini",
+                        "messages": [
+                            {"role": "system", "content": prompt},
+                            {"role": "user", "content": turn},
+                        ],
+                        "temperature": 0,
+                        "max_tokens": 256,
+                    },
+                )
+                resp.raise_for_status()
+                content = resp.json()["choices"][0]["message"]["content"].strip()
+                facts = json.loads(content)
+                if isinstance(facts, list):
+                    for fact in facts:
+                        if isinstance(fact, str) and fact.strip():
+                            self.add_fact(fact)
+        except Exception:
+            pass  # Extraction is best-effort; never crash the session

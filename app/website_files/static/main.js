@@ -4,6 +4,8 @@ let isMuted = false; // Microphone mute state
 let isPushToTalk = false; // Push-to-talk mode
 let transcriptMessages = []; // Store transcript messages
 let streamingResponse = null; // Track current streaming response { index, content, type }
+let currentTurnUserTranscript = ''; // Last user utterance for memory extraction
+let currentTurnAssistantTranscript = ''; // Current assistant response for memory extraction
 
 // Cost tracking state (gpt-realtime-1.5)
 let sessionCost = {
@@ -668,6 +670,8 @@ const handleWebRTCMessage = (event) => {
       if (data.transcript) {
         const itemId = data.item_id;
         console.log('User transcript:', data.transcript, 'itemId:', itemId);
+        currentTurnUserTranscript = data.transcript; // Capture for memory extraction
+        currentTurnAssistantTranscript = ''; // Reset assistant side for new turn
         if (itemId && findMessageByItemId(itemId) !== -1) {
           updateMessageByItemId(itemId, data.transcript);
         } else {
@@ -691,6 +695,9 @@ const handleWebRTCMessage = (event) => {
     // Assistant's audio response transcript completed
     else if (data.type === 'response.audio_transcript.done') {
       const itemId = data.item_id;
+      if (data.transcript) {
+        currentTurnAssistantTranscript = data.transcript; // Capture for memory extraction
+      }
       if (streamingResponse && streamingResponse.type === 'audio_transcript') {
         // Finalize with the complete transcript
         finalizeStreamingResponse(data.transcript);
@@ -763,9 +770,21 @@ const handleWebRTCMessage = (event) => {
       if (streamingResponse) {
         finalizeStreamingResponse();
       }
-      // Accumulate token costs from response.done usage data
-      if (data.type === 'response.done' && data.response?.usage) {
-        updateCostFromResponse(data.response.usage);
+      if (data.type === 'response.done') {
+        // Accumulate token costs from response.done usage data
+        if (data.response?.usage) {
+          updateCostFromResponse(data.response.usage);
+        }
+        // Fire memory extraction if assistant spoke (skips tool-only turns)
+        if (currentTurnUserTranscript && currentTurnAssistantTranscript &&
+            webRTC?.ws?.readyState === WebSocket.OPEN) {
+          webRTC.ws.send(JSON.stringify({
+            type: 'ducke.turn_done',
+            user_text: currentTurnUserTranscript,
+            assistant_text: currentTurnAssistantTranscript,
+          }));
+          currentTurnAssistantTranscript = ''; // Reset for next response in same turn
+        }
       }
     }
     // OpenAI Realtime API error — surface to transcript so it's visible
