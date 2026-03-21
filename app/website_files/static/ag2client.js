@@ -487,9 +487,34 @@ var ag2client = (() => {
           const messageJSON = JSON.stringify(message);
           if (dc) {
             dc.send(messageJSON);
+            // After forwarding a function_call_output to OpenAI, immediately
+            // send response.create to trigger the model's spoken continuation.
+            // This is done here (not in the backend) so the response.create
+            // is sent directly on the data channel without an extra relay hop.
+            if (
+              type === "conversation.item.create" &&
+              message.item?.type === "function_call_output"
+            ) {
+              const responseCreate = JSON.stringify({
+                type: "response.create",
+                response: { modalities: ["text", "audio"] },
+              });
+              dc.send(responseCreate);
+              console.log("Sent response.create after function_call_output for call_id:", message.item.call_id);
+            }
           } else {
             console.log("DC not ready yet, queueing", message);
             quedMessages.push(messageJSON);
+            // Queue response.create right after the function_call_output
+            if (
+              type === "conversation.item.create" &&
+              message.item?.type === "function_call_output"
+            ) {
+              quedMessages.push(JSON.stringify({
+                type: "response.create",
+                response: { modalities: ["text", "audio"] },
+              }));
+            }
           }
         } catch (error) {
           console.error("Error processing websocket message", event.data, error);

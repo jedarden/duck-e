@@ -747,29 +747,40 @@
             color: var(--success);
         }
 
-        .tool-call-metadata {
-            padding: 10px 12px;
+        .tool-call-body {
             border-top: 1px solid var(--border);
         }
 
-        .tool-call-args {
-            font-size: 0.8rem;
+        .tool-call-section {
+            padding: 8px 12px;
+        }
+
+        .tool-call-section + .tool-call-section {
+            border-top: 1px solid var(--border);
+        }
+
+        .tool-call-section-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
             color: var(--text-muted);
-            white-space: pre-wrap;
-            word-break: break-all;
-            margin: 0;
+            margin-bottom: 4px;
         }
 
-        .tool-call-result {
-            margin-top: 8px;
+        .tool-call-section-text {
             font-size: 0.8rem;
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
             color: var(--text-secondary);
+            max-height: 200px;
+            overflow-y: auto;
         }
 
-        .tool-call-result pre {
-            margin-top: 4px;
-            white-space: pre-wrap;
-            word-break: break-all;
+        .tool-call-loading {
+            color: var(--warning);
+            font-style: italic;
+            font-size: 0.8rem;
         }
 
         .transcript-content {

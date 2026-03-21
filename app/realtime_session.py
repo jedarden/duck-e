@@ -261,11 +261,10 @@ class RealtimeSession:
                 "output": result_str,
             },
         })
-
-        # Trigger the model to generate an audio response after the tool result.
-        # The Realtime API does not auto-respond after function_call_output —
-        # an explicit response.create is required.
-        await self.websocket.send_json({"type": "response.create"})
+        # NOTE: response.create is sent by the browser client (ag2client.js)
+        # immediately after it forwards the function_call_output to the
+        # OpenAI data channel.  Sending it from the backend was unreliable
+        # because the relay adds latency and the message could be dropped.
 
         t_sent = time.monotonic()
         self.logger.info(json.dumps({

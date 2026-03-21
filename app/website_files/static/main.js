@@ -518,13 +518,30 @@ const renderTranscript = (isStreamingUpdate = false) => {
   }
 
   const html = visibleMessages.map((msg, idx) => {
-    // Tool call messages get a collapsible card rendering
+    // Tool call messages — collapsed by default, expand to see request + response
     if (msg.type === 'tool_call') {
       let argsFormatted = msg.toolArgs || '';
       try {
         argsFormatted = JSON.stringify(JSON.parse(msg.toolArgs), null, 2);
       } catch (e) { /* keep raw */ }
+
       const statusClass = msg.status === 'completed' ? 'completed' : 'pending';
+
+      // Response section inside the expandable body
+      let resultHtml = '';
+      if (msg.result) {
+        resultHtml = `
+          <div class="tool-call-section">
+            <div class="tool-call-section-label">Response</div>
+            <pre class="tool-call-section-text">${msg.result}</pre>
+          </div>`;
+      } else if (msg.status === 'pending') {
+        resultHtml = `
+          <div class="tool-call-section">
+            <span class="tool-call-loading">Waiting for result...</span>
+          </div>`;
+      }
+
       return `
         <div class="transcript-message tool-call" data-idx="${idx}">
           <details class="tool-call-details">
@@ -533,9 +550,12 @@ const renderTranscript = (isStreamingUpdate = false) => {
               <span class="tool-call-name">${msg.toolName}</span>
               <span class="tool-call-status ${statusClass}">${msg.status}</span>
             </summary>
-            <div class="tool-call-metadata">
-              <pre class="tool-call-args">${argsFormatted}</pre>
-              ${msg.result ? `<div class="tool-call-result"><strong>Result:</strong><pre>${msg.result}</pre></div>` : ''}
+            <div class="tool-call-body">
+              <div class="tool-call-section">
+                <div class="tool-call-section-label">Request</div>
+                <pre class="tool-call-section-text">${argsFormatted}</pre>
+              </div>
+              ${resultHtml}
             </div>
           </details>
         </div>
@@ -747,6 +767,12 @@ const handleWebRTCMessage = (event) => {
       if (data.type === 'response.done' && data.response?.usage) {
         updateCostFromResponse(data.response.usage);
       }
+    }
+    // OpenAI Realtime API error — surface to transcript so it's visible
+    else if (data.type === 'error') {
+      const errMsg = data.error?.message || JSON.stringify(data.error) || 'Unknown error';
+      console.error('[DUCK-E] Realtime API error:', data.error);
+      addTranscriptMessage('system', `Error: ${errMsg}`);
     }
     // Custom transcript message from backend
     else if (data.type === 'transcript') {
