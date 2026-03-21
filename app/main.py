@@ -349,7 +349,10 @@ async def handle_media_stream(websocket: WebSocket):
 
         async def _on_turn_done(user_text: str, assistant_text: str) -> None:
             if memory_store is not None:
-                await memory_store.extract_and_save(user_text, assistant_text, _extraction_api_key)
+                await memory_store.extract_and_save(
+                    user_text, assistant_text, _extraction_api_key,
+                    cost_tracker=cost_tracker, session_id=session_id,
+                )
 
         session = RealtimeSession(
             websocket=websocket,
@@ -533,6 +536,18 @@ async def handle_media_stream(websocket: WebSocket):
 
             t_response = time.monotonic()
             duration_ms = round((t_response - t_request) * 1000, 1)
+
+            # Track token usage for cost accounting
+            if hasattr(response, 'usage') and response.usage:
+                try:
+                    await cost_tracker.track_usage(
+                        session_id=session_id,
+                        model="gpt-5.4-nano",
+                        input_tokens=response.usage.input_tokens,
+                        output_tokens=response.usage.output_tokens,
+                    )
+                except Exception:
+                    pass  # Never crash the session over cost tracking
 
             if hasattr(response, 'output_text') and response.output_text:
                 result_text = response.output_text

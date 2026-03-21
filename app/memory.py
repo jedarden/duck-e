@@ -72,6 +72,8 @@ class UserMemoryStore:
         user_text: str,
         assistant_text: str,
         api_key: str,
+        cost_tracker=None,
+        session_id: str | None = None,
     ) -> None:
         """
         Extract memorable facts from a conversation turn and save them.
@@ -112,7 +114,23 @@ class UserMemoryStore:
                     },
                 )
                 resp.raise_for_status()
-                content = resp.json()["choices"][0]["message"]["content"].strip()
+                data = resp.json()
+
+                # Track token usage if cost_tracker is provided
+                if cost_tracker is not None and session_id is not None:
+                    usage = data.get("usage", {})
+                    if usage:
+                        try:
+                            await cost_tracker.track_usage(
+                                session_id=session_id,
+                                model="gpt-5.4-nano",
+                                input_tokens=usage.get("prompt_tokens", 0),
+                                output_tokens=usage.get("completion_tokens", 0),
+                            )
+                        except Exception:
+                            pass  # Never crash the session over cost tracking
+
+                content = data["choices"][0]["message"]["content"].strip()
                 facts = json.loads(content)
                 if isinstance(facts, list):
                     for fact in facts:
