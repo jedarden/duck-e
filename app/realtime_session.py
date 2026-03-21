@@ -119,42 +119,17 @@ class RealtimeSession:
             self.voice = voice
 
             # Send a session.update event to change the voice.
-            # This uses the OpenAI Realtime API's GA format which supports
-            # dynamic voice changes via session.update without reinitializing.
+            # The function_call_output from _handle_tool_call (containing
+            # "Voice changed to X") will be spoken in the new voice, and
+            # ag2client.js will send response.create to trigger continuation.
             await self.websocket.send_json({
                 "type": "ducke.session_update",
                 "update": {
                     "type": "session.update",
                     "session": {
-                        "type": "realtime",
-                        "audio": {
-                            "output": {"voice": voice},
-                        },
+                        "voice": voice,
                     },
                 },
-                # Inject a context note so DUCK-E knows to confirm the voice change
-                "init": [
-                    {
-                        "type": "conversation.item.create",
-                        "item": {
-                            "type": "message",
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": (
-                                        f"(System: The voice was just changed to {voice}. "
-                                        f"Briefly confirm this to the user in one short sentence, "
-                                        f"e.g. 'Voice changed to {voice}.')"
-                                    ),
-                                }
-                            ],
-                        },
-                    },
-                    {
-                        "type": "response.create",
-                    },
-                ],
             })
             return f"Voice changed to {voice}."
         except Exception as e:

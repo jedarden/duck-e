@@ -410,7 +410,8 @@ var ag2client = (() => {
           // without tearing down the WebRTC connection. This is faster and
           // more reliable than the old ducke.reinit approach.
           if (type === "ducke.session_update") {
-            console.log("ducke.session_update received — updating voice via session.update:", message.update?.session?.audio?.output?.voice);
+            const voice = message.update?.session?.voice;
+            console.log("ducke.session_update received — updating voice via session.update:", voice);
             // Send the session.update event to OpenAI
             const updateJSON = JSON.stringify(message.update);
             if (dc) {
@@ -420,21 +421,8 @@ var ag2client = (() => {
               console.log("DC not ready yet, queueing session.update");
               quedMessages.push(updateJSON);
             }
-            // Send any init messages (e.g., voice change confirmation prompt)
-            if (message.init && dc) {
-              for (const init_chunk of message.init) {
-                dc.send(JSON.stringify(init_chunk));
-              }
-              console.log("Sent init chunks after session.update");
-            } else if (message.init) {
-              for (const init_chunk of message.init) {
-                quedMessages.push(JSON.stringify(init_chunk));
-              }
-              console.log("Queued init chunks (dc not ready)");
-            }
             // Notify main.js so it can display a voice-change status message
-            if (this.onMessage && message.update?.session?.audio?.output?.voice) {
-              const voice = message.update.session.audio.output.voice;
+            if (this.onMessage && voice) {
               const notif = { type: "ducke.voice_changed", voice: voice };
               this.onMessage({ data: JSON.stringify(notif), message: notif });
             }
