@@ -18,7 +18,7 @@ import uuid
 
 # Import configuration module for automatic OAI_CONFIG_LIST generation
 from app.config import get_realtime_config, get_swarm_config, validate_config
-from app.memory import UserMemoryStore
+from app.memory import UserMemoryStore, FactCategory, FactSource
 from app.realtime_session import RealtimeSession
 
 # Import security middleware
@@ -596,14 +596,28 @@ async def handle_media_stream(websocket: WebSocket):
     )
 
     if memory_store is not None:
-        def save_memory(fact: str) -> str:
+        def save_memory(
+            fact: str,
+            category: str = "context",
+            confidence: float = 1.0,
+        ) -> str:
             """Save a fact about the current user to persistent memory."""
             fact = fact.strip()
             if not fact:
                 return json.dumps({"status": "error", "message": "Fact cannot be empty."})
-            memory_store.add_fact(fact)
-            logger.info(f"Saved memory for user {user_identity!r}: {fact!r}")
-            return json.dumps({"status": "ok", "message": "Memory saved."})
+            try:
+                cat = FactCategory(category.lower())
+            except ValueError:
+                cat = FactCategory.CONTEXT
+            confidence = min(1.0, max(0.0, confidence))
+            memory_store.add_fact(
+                text=fact,
+                category=cat,
+                confidence=confidence,
+                source=FactSource.EXPLICIT,
+            )
+            logger.info(f"Saved memory for user {user_identity!r}: {fact!r} (category={cat.value}, confidence={confidence})")
+            return json.dumps({"status": "ok", "message": "Memory saved.", "category": cat.value, "confidence": confidence})
 
         session.register_tool(
             name="save_memory",
@@ -615,6 +629,15 @@ async def handle_media_stream(websocket: WebSocket):
                     "fact": {
                         "type": "string",
                         "description": "The fact or preference to remember about the user."
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["preference", "personal", "correction", "context"],
+                        "description": "Category of the fact. Default: context"
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "description": "Confidence level 0.0-1.0. Default: 1.0 for explicit saves"
                     }
                 },
                 "required": ["fact"]
