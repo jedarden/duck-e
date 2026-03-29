@@ -329,14 +329,16 @@ async def handle_media_stream(websocket: WebSocket):
 
         if memory_store is not None:
             user_display = forwarded_name or forwarded_email or forwarded_user
-            facts = memory_store.get_facts()
+            structured_facts = memory_store.get_structured_facts()
             memory_section = f"\n\nThe current user is {user_display}"
             if forwarded_email and forwarded_email != user_display:
                 memory_section += f" ({forwarded_email})"
             memory_section += "."
-            if facts:
+            if structured_facts:
                 memory_section += "\nHere are things you remember about this user:\n"
-                memory_section += "\n".join(f"- {f}" for f in facts)
+                memory_section += "\n".join(
+                    f"- [{f.category.value}] {f.text}" for f in structured_facts
+                )
             memory_section += (
                 "\nUse save_memory when you learn preferences or important information about the user. "
                 "Use recall_memories to retrieve what you know about the user on demand."
@@ -596,7 +598,7 @@ async def handle_media_stream(websocket: WebSocket):
     )
 
     if memory_store is not None:
-        def save_memory(
+        async def save_memory(
             fact: str,
             category: str = "context",
             confidence: float = 1.0,
@@ -610,14 +612,19 @@ async def handle_media_stream(websocket: WebSocket):
             except ValueError:
                 cat = FactCategory.CONTEXT
             confidence = min(1.0, max(0.0, confidence))
-            memory_store.add_fact(
+            added = await memory_store.add_fact_with_semantic_dedup(
                 text=fact,
+                api_key=_extraction_api_key,
                 category=cat,
                 confidence=confidence,
                 source=FactSource.EXPLICIT,
             )
-            logger.info(f"Saved memory for user {user_identity!r}: {fact!r} (category={cat.value}, confidence={confidence})")
-            return json.dumps({"status": "ok", "message": "Memory saved.", "category": cat.value, "confidence": confidence})
+            if added:
+                logger.info(f"Saved memory for user {user_identity!r}: {fact!r} (category={cat.value}, confidence={confidence})")
+                return json.dumps({"status": "ok", "message": "Memory saved.", "category": cat.value, "confidence": confidence})
+            else:
+                logger.info(f"Skipped duplicate memory for user {user_identity!r}: {fact!r}")
+                return json.dumps({"status": "ok", "message": "Already known.", "category": cat.value, "confidence": confidence})
 
         session.register_tool(
             name="save_memory",

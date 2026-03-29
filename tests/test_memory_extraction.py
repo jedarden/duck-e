@@ -34,14 +34,31 @@ class TestExtractAndSave:
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {
-            "choices": [{"message": {"content": '["User lives in London", "User prefers Celsius"]'}}]
+            "choices": [{"message": {"content": '[{"text": "User lives in London", "category": "personal", "confidence": 0.9}, {"text": "User prefers Celsius", "category": "preference", "confidence": 0.85}]'}}]
         }
+
+        # semantic_compare calls are also mocked — return "distinct" to avoid dedup interference
+        semantic_response = MagicMock()
+        semantic_response.raise_for_status = MagicMock()
+        semantic_response.json.return_value = {
+            "choices": [{"message": {"content": "distinct"}}]
+        }
+
+        call_count = 0
+
+        async def selective_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # First call is the extraction prompt; subsequent calls are semantic_compare
+            if call_count == 1:
+                return mock_response
+            return semantic_response
 
         with patch("app.memory.httpx.AsyncClient") as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=mock_response)
+            mock_client.post = selective_post
             mock_client_cls.return_value = mock_client
 
             await store.extract_and_save(

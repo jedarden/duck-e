@@ -281,8 +281,9 @@ class UserMemoryStore:
                                 except ValueError:
                                     category = FactCategory.CONTEXT
                                 confidence = min(1.0, max(0.0, float(fact.get("confidence", 0.7))))
-                                self.add_fact(
+                                await self.add_fact_with_semantic_dedup(
                                     text=text,
+                                    api_key=api_key,
                                     category=category,
                                     confidence=confidence,
                                     source=FactSource.AUTO,
@@ -298,13 +299,14 @@ class UserMemoryStore:
     ) -> str:
         """
         Use gpt-5.4-nano to compare two facts semantically.
-        Returns: 'duplicate' | 'contradiction' | 'distinct'
+        Returns: 'duplicate' | 'contradiction' | 'refinement' | 'distinct'
         """
         prompt = (
             "Compare these two facts about a user. Return ONLY one word:\n"
-            "- 'duplicate' if they are the same or very similar\n"
-            "- 'contradiction' if they contradict each other\n"
-            "- 'distinct' if they are different but not contradictory\n\n"
+            "- 'duplicate' if they express the same information\n"
+            "- 'contradiction' if they directly contradict each other\n"
+            "- 'refinement' if Fact 2 is a more specific or updated version of Fact 1\n"
+            "- 'distinct' if they are unrelated or independently useful\n\n"
             f"Fact 1: {text1}\nFact 2: {text2}"
         )
         try:
@@ -325,7 +327,7 @@ class UserMemoryStore:
                 resp.raise_for_status()
                 data = resp.json()
                 result = data["choices"][0]["message"]["content"].strip().lower()
-                if result in ("duplicate", "contradiction", "distinct"):
+                if result in ("duplicate", "contradiction", "refinement", "distinct"):
                     return result
                 return "distinct"
         except Exception:
@@ -373,8 +375,8 @@ class UserMemoryStore:
                     result = await self.semantic_compare(text, fact.text, api_key)
                     if result == "duplicate":
                         return False
-                    if result == "contradiction":
-                        # Remove old fact, will add new one
+                    if result in ("contradiction", "refinement"):
+                        # Replace old fact with new (contradiction: new overrides; refinement: new is more specific)
                         self._facts.remove(fact)
                         break
 
