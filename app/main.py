@@ -329,19 +329,25 @@ async def handle_media_stream(websocket: WebSocket):
 
         if memory_store is not None:
             user_display = forwarded_name or forwarded_email or forwarded_user
-            structured_facts = memory_store.get_structured_facts()
+            summary = await memory_store.get_or_generate_summary(first_config["api_key"])
             memory_section = f"\n\nThe current user is {user_display}"
             if forwarded_email and forwarded_email != user_display:
                 memory_section += f" ({forwarded_email})"
             memory_section += "."
-            if structured_facts:
-                memory_section += "\nHere are things you remember about this user:\n"
-                memory_section += "\n".join(
-                    f"- [{f.category.value}] {f.text}" for f in structured_facts
-                )
+            if summary:
+                memory_section += f"\n{summary}"
+            else:
+                # Fallback: list facts directly if summary unavailable
+                structured_facts = memory_store.get_structured_facts()
+                if structured_facts:
+                    memory_section += "\nHere are things you remember about this user:\n"
+                    memory_section += "\n".join(
+                        f"- [{f.category.value}] {f.text}" for f in structured_facts
+                    )
             memory_section += (
                 "\nUse save_memory when you learn preferences or important information about the user. "
-                "Use recall_memories to retrieve what you know about the user on demand."
+                "Use recall_memories to retrieve what you know about the user on demand; "
+                "pass a topic to filter for relevant facts only."
             )
             system_message = base_system_message + memory_section
         else:
@@ -651,20 +657,30 @@ async def handle_media_stream(websocket: WebSocket):
             }
         )
 
-        def recall_memories() -> str:
-            """Retrieve stored memories about the current user."""
-            facts = memory_store.get_facts()
+        async def recall_memories(topic: str = "") -> str:
+            """Retrieve stored memories about the current user, optionally filtered by topic."""
+            if topic and topic.strip():
+                facts = await memory_store.get_facts_by_topic_async(topic.strip(), _extraction_api_key)
+                if not facts:
+                    facts = memory_store.get_facts()
+            else:
+                facts = memory_store.get_facts()
             if facts:
-                return json.dumps({"facts": facts})
+                return json.dumps({"facts": facts, "topic": topic or None})
             return json.dumps({"facts": [], "message": "No memories stored for this user yet."})
 
         session.register_tool(
             name="recall_memories",
-            description="Retrieve stored facts and preferences about the current user.",
+            description="Retrieve stored facts and preferences about the current user. Provide a topic to filter for relevant facts only.",
             handler=recall_memories,
             parameters={
                 "type": "object",
-                "properties": {}
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "description": "Optional topic to filter memories (e.g. 'food preferences', 'location'). Returns all memories if omitted."
+                    }
+                }
             }
         )
 

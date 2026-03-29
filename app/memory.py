@@ -343,6 +343,149 @@ class UserMemoryStore:
         union = len(words1 | words2)
         return intersection / union if union > 0 else 0.0
 
+    def _facts_hash(self) -> str:
+        """Compute a hash of current facts for summary cache invalidation."""
+        content = json.dumps([f.to_dict() for f in self._facts], sort_keys=True)
+        return hashlib.md5(content.encode()).hexdigest()
+
+    async def get_or_generate_summary(
+        self,
+        api_key: str,
+        cost_tracker=None,
+        session_id: str | None = None,
+        on_backend_cost=None,
+    ) -> str:
+        """Return a cached one-paragraph user summary, regenerating if facts changed."""
+        if not self._facts:
+            return ""
+        current_hash = self._facts_hash()
+        if (
+            self._data.get("summary_facts_hash") == current_hash
+            and self._data.get("user_summary")
+        ):
+            return self._data["user_summary"]
+        summary = await self._generate_summary(api_key, cost_tracker, session_id, on_backend_cost)
+        if summary:
+            self._data["user_summary"] = summary
+            self._data["summary_facts_hash"] = current_hash
+            self.save()
+        return summary
+
+    async def _generate_summary(
+        self,
+        api_key: str,
+        cost_tracker=None,
+        session_id: str | None = None,
+        on_backend_cost=None,
+    ) -> str:
+        """Generate a one-paragraph summary of the user from current facts."""
+        facts_text = "\n".join(f"- {f.text}" for f in self._facts)
+        prompt = (
+            "Based on these facts about a user, write a single concise paragraph summarizing "
+            "who they are and what they care about. Focus on the most important details. "
+            "Write in third person (e.g., 'The user...'). Keep it to 2-4 sentences.\n\n"
+            f"Facts:\n{facts_text}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "gpt-5.4-nano",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.3,
+                        "max_tokens": 150,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if cost_tracker is not None and session_id is not None:
+                    usage = data.get("usage", {})
+                    if usage:
+                        try:
+                            await cost_tracker.track_usage(
+                                session_id=session_id,
+                                model="gpt-5.4-nano",
+                                input_tokens=usage.get("prompt_tokens", 0),
+                                output_tokens=usage.get("completion_tokens", 0),
+                            )
+                        except Exception:
+                            pass
+                        if on_backend_cost is not None:
+                            try:
+                                await on_backend_cost(
+                                    "gpt-5.4-nano",
+                                    usage.get("prompt_tokens", 0),
+                                    usage.get("completion_tokens", 0),
+                                )
+                            except Exception:
+                                pass
+                return data["choices"][0]["message"]["content"].strip()
+        except Exception:
+            return ""
+
+    def get_facts_by_topic(self, topic: str) -> list[str]:
+        """Return facts relevant to topic using keyword substring matching."""
+        topic_words = [w.lower() for w in topic.split() if len(w) > 3]
+        if not topic_words:
+            return []
+        matched = []
+        for fact in self._facts:
+            fact_lower = fact.text.lower()
+            if any(word in fact_lower for word in topic_words):
+                matched.append(fact.text)
+        return matched
+
+    async def get_facts_by_topic_async(self, topic: str, api_key: str) -> list[str]:
+        """Return topic-relevant facts. Uses keyword matching, falls back to embeddings."""
+        matches = self.get_facts_by_topic(topic)
+        if matches:
+            return matches
+        return await self._get_facts_by_embedding(topic, api_key)
+
+    async def _get_facts_by_embedding(self, topic: str, api_key: str) -> list[str]:
+        """Use OpenAI text-embedding-3-small for cosine similarity retrieval."""
+        if not self._facts:
+            return []
+        fact_texts = [f.text for f in self._facts]
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/embeddings",
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "text-embedding-3-small",
+                        "input": [topic] + fact_texts,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            embeddings = [item["embedding"] for item in data["data"]]
+            topic_emb = embeddings[0]
+            fact_embs = embeddings[1:]
+
+            def cosine_sim(a: list, b: list) -> float:
+                dot = sum(x * y for x, y in zip(a, b))
+                norm_a = sum(x * x for x in a) ** 0.5
+                norm_b = sum(x * x for x in b) ** 0.5
+                return dot / (norm_a * norm_b) if norm_a and norm_b else 0.0
+
+            THRESHOLD = 0.4
+            scored = sorted(
+                [(cosine_sim(topic_emb, emb), text) for emb, text in zip(fact_embs, fact_texts)],
+                reverse=True,
+            )
+            return [text for score, text in scored if score >= THRESHOLD]
+        except Exception:
+            return []
+
     async def add_fact_with_semantic_dedup(
         self,
         text: str,
