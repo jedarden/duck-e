@@ -15,6 +15,11 @@ from typing import Literal
 MAX_FACTS = 100
 DEFAULT_MEMORY_DIR = "/data/memory"
 
+DECAY_THRESHOLD = 0.3       # Prune facts below this confidence on load
+DECAY_PERIOD_DAYS = 30      # Days between decay steps
+AUTO_DECAY_RATE = 0.1       # Confidence lost per period for auto-extracted facts
+EXPLICIT_DECAY_RATE = 0.05  # Slower decay for explicitly saved facts
+
 
 class FactCategory(str, Enum):
     """Categories for user memory facts."""
@@ -105,6 +110,10 @@ class UserMemoryStore:
                         last_referenced=f.get("created_at", datetime.now(timezone.utc).isoformat()),
                     ))
 
+        # Apply decay and prune stale facts; persist if anything changed
+        if self._apply_decay():
+            self.save()
+
     def save(self) -> None:
         """Persist memory to disk."""
         try:
@@ -115,6 +124,36 @@ class UserMemoryStore:
                 json.dump(self._data, f, indent=2)
         except OSError:
             pass  # Memory is best-effort; don't crash the session
+
+    def _apply_decay(self) -> bool:
+        """
+        Apply time-based confidence decay to all facts.
+        Facts unreferenced for 30+ days lose confidence: auto at 0.1/period, explicit at 0.05/period.
+        Prunes facts whose confidence drops below DECAY_THRESHOLD.
+        Returns True if any facts were pruned.
+        """
+        now = datetime.now(timezone.utc)
+        surviving = []
+        for fact in self._facts:
+            try:
+                last_ref = datetime.fromisoformat(fact.last_referenced)
+                if last_ref.tzinfo is None:
+                    last_ref = last_ref.replace(tzinfo=timezone.utc)
+                days_stale = (now - last_ref).days
+            except (ValueError, TypeError):
+                days_stale = 0
+
+            if days_stale >= DECAY_PERIOD_DAYS:
+                periods = days_stale / DECAY_PERIOD_DAYS
+                rate = EXPLICIT_DECAY_RATE if fact.source == FactSource.EXPLICIT else AUTO_DECAY_RATE
+                fact.confidence = max(0.0, fact.confidence - rate * periods)
+
+            if fact.confidence >= DECAY_THRESHOLD:
+                surviving.append(fact)
+
+        pruned = len(surviving) < len(self._facts)
+        self._facts = surviving
+        return pruned
 
     def _normalize_text(self, text: str) -> str:
         """Normalize text for comparison."""
@@ -144,7 +183,7 @@ class UserMemoryStore:
         source: FactSource = FactSource.AUTO,
     ) -> bool:
         """
-        Add a structured fact about the user with deduplication.
+        Add a structured fact about the user with deduplication and contradiction detection.
         Returns True if fact was added, False if duplicate/skipped.
         Enforces MAX_FACTS limit.
         """
@@ -152,9 +191,30 @@ class UserMemoryStore:
         if not text:
             return False
 
+        # Explicit corrections always override with full confidence
+        if source == FactSource.EXPLICIT and category == FactCategory.CORRECTION:
+            confidence = 1.0
+
         # Deduplication: skip if exact or near-exact match exists
         if self._is_duplicate(text, category):
             return False
+
+        # Contradiction detection: remove same-category facts that likely conflict.
+        # Explicit saves use a lower threshold (more aggressive replacement) since
+        # the user is intentionally correcting information.
+        # CORRECTION category also checks across all categories.
+        new_normalized = self._normalize_text(text)
+        sim_threshold = 0.2 if source == FactSource.EXPLICIT else 0.4
+        categories_to_check = list(FactCategory) if category == FactCategory.CORRECTION else [category]
+
+        facts_to_remove = []
+        for fact in self._facts:
+            if fact.category in categories_to_check:
+                existing_normalized = self._normalize_text(fact.text)
+                if self._similarity_ratio(new_normalized, existing_normalized) >= sim_threshold:
+                    facts_to_remove.append(fact)
+        for fact in facts_to_remove:
+            self._facts.remove(fact)
 
         # Trim oldest facts if at limit
         if len(self._facts) >= MAX_FACTS:
@@ -514,7 +574,7 @@ class UserMemoryStore:
                 existing_normalized = self._normalize_text(fact.text)
                 # If strings are somewhat similar but not exact, use semantic comparison
                 similarity = self._similarity_ratio(new_normalized, existing_normalized)
-                if 0.3 < similarity < 0.9:
+                if 0.1 < similarity < 0.9:
                     result = await self.semantic_compare(text, fact.text, api_key)
                     if result == "duplicate":
                         return False
