@@ -13,6 +13,7 @@ import json
 import meilisearch
 import os
 import requests
+import socket
 import time
 import uuid
 
@@ -43,9 +44,11 @@ from app.middleware.rate_limiting import (
 from slowapi.errors import RateLimitExceeded
 
 # Import input validators and sanitizers
-from app.models.validators import LocationInput, SearchQuery, AcceptLanguage
+from app.models.validators import LocationInput, SearchQuery, AcceptLanguage, FetchUrl
 from app.security.sanitizers import sanitize_url_parameter, sanitize_api_response
 from pydantic import ValidationError
+from bs4 import BeautifulSoup
+from ipaddress import ip_address, IPv4Address, IPv6Address, AddressValueError
 
 # Load and validate realtime configuration using auto-generated config
 logger = getLogger("uvicorn.error")
@@ -600,6 +603,165 @@ async def handle_media_stream(websocket: WebSocket):
                 "query": {"type": "string", "description": "search_query"}
             },
             "required": ["query"]
+        }
+    )
+
+    def _is_private_ip(ip_str: str) -> bool:
+        """Check if an IP address is private/internal (SSRF protection)."""
+        try:
+            addr = ip_address(ip_str)
+            if isinstance(addr, IPv4Address):
+                return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+            elif isinstance(addr, IPv6Address):
+                return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+        except (ValueError, AddressValueError):
+            pass
+        return False
+
+    async def web_fetch(url: Annotated[str, "url"]) -> str:
+        """
+        Fetch content from a URL with SSRF protection.
+        Extracts visible text from HTML, returns raw text for text/plain and application/json.
+        Truncates output to 3000 characters.
+        """
+        try:
+            # Validate and sanitize URL
+            validated_url = FetchUrl(url=url)
+            safe_url = validated_url.url
+
+            t_request = time.monotonic()
+            logger.info(json.dumps({"event": "web_fetch.request_sent", "url": safe_url,
+                                    "ts": time.time()}))
+
+            # Browser-like User-Agent
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+
+            # Parse hostname for initial SSRF check
+            from urllib.parse import urlparse
+            parsed = urlparse(safe_url)
+            initial_hostname = parsed.hostname
+
+            if initial_hostname:
+                # Resolve initial hostname to IP and check if private
+                try:
+                    loop = asyncio.get_event_loop()
+                    initial_ip = await loop.run_in_executor(None, lambda: socket.gethostbyname(initial_hostname))
+                    if _is_private_ip(initial_ip):
+                        logger.warning(json.dumps({"event": "web_fetch.ssrf_blocked",
+                                                    "url": safe_url, "hostname": initial_hostname,
+                                                    "ip": initial_ip, "ts": time.time()}))
+                        return json.dumps({"error": "Cannot fetch from internal/private addresses"})
+                except socket.gaierror:
+                    logger.warning(f"DNS resolution failed for hostname: {initial_hostname}")
+                    return json.dumps({"error": "Failed to resolve hostname"})
+
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, max_redirects=5) as client:
+                response = await client.get(safe_url, headers=headers)
+
+            t_response = time.monotonic()
+            duration_ms = round((t_response - t_request) * 1000, 1)
+
+            content_type = response.headers.get("content-type", "")
+            response_size = len(response.content)
+
+            # Log fetch metrics
+            logger.info(json.dumps({"event": "web_fetch.response_received",
+                                    "url": safe_url,
+                                    "status": response.status_code,
+                                    "content_type": content_type,
+                                    "response_size": response_size,
+                                    "duration_ms": duration_ms,
+                                    "ts": time.time()}))
+
+            if response.status_code != 200:
+                logger.warning(f"web_fetch returned status {response.status_code} for {safe_url}")
+                return json.dumps({"error": f"HTTP {response.status_code}", "url": safe_url})
+
+            # Handle different content types
+            if "text/html" in content_type:
+                # Parse HTML and extract visible text
+                soup = BeautifulSoup(response.text, "html.parser")
+
+                # Remove script, style, nav, footer, header, aside elements
+                for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+                    tag.decompose()
+
+                # Get text
+                text = soup.get_text(separator=" ", strip=True)
+
+                # Truncate to 3000 chars
+                if len(text) > 3000:
+                    text = text[:3000] + "..."
+
+                return json.dumps({
+                    "url": safe_url,
+                    "content_type": "text/html",
+                    "text": text,
+                    "truncated": len(soup.get_text(separator=" ", strip=True)) > 3000
+                })
+
+            elif "text/plain" in content_type:
+                text = response.text
+                if len(text) > 3000:
+                    text = text[:3000] + "..."
+
+                return json.dumps({
+                    "url": safe_url,
+                    "content_type": "text/plain",
+                    "text": text,
+                    "truncated": len(response.text) > 3000
+                })
+
+            elif "application/json" in content_type:
+                text = response.text
+                if len(text) > 3000:
+                    text = text[:3000] + "..."
+
+                return json.dumps({
+                    "url": safe_url,
+                    "content_type": "application/json",
+                    "text": text,
+                    "truncated": len(response.text) > 3000
+                })
+
+            else:
+                # Unknown content type - return first 3000 chars as-is
+                text = response.text
+                if len(text) > 3000:
+                    text = text[:3000] + "..."
+
+                return json.dumps({
+                    "url": safe_url,
+                    "content_type": content_type,
+                    "text": text,
+                    "truncated": len(response.text) > 3000
+                })
+
+        except ValidationError as e:
+            logger.error(f"URL validation failed for '{url}': {e}")
+            return json.dumps({"error": "Invalid URL format"})
+        except httpx.TimeoutException:
+            logger.error(f"web_fetch timeout for {url}")
+            return json.dumps({"error": "Request timed out after 15 seconds"})
+        except httpx.HTTPError as e:
+            logger.error(f"web_fetch HTTP error for {url}: {e}")
+            return json.dumps({"error": f"HTTP error: {str(e)}"})
+        except Exception as e:
+            logger.error(f"web_fetch error: {str(e)}", exc_info=True)
+            return json.dumps({"error": "Failed to fetch URL"})
+
+    session.register_tool(
+        name="web_fetch",
+        description="Fetch and extract content from a URL. For HTML pages, extracts visible text (scripts, styles, nav, footer, header, aside are stripped). For text/plain and application/json, returns raw content. Output truncated to 3000 characters.",
+        handler=web_fetch,
+        parameters={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to fetch"}
+            },
+            "required": ["url"]
         }
     )
 
