@@ -21,7 +21,10 @@ All validators implement security controls against:
 
 from pydantic import BaseModel, Field, validator
 import re
+import socket
+import urllib.parse
 from typing import Optional
+from ipaddress import ip_address, IPv4Address, IPv6Address
 
 
 class LocationInput(BaseModel):
@@ -283,3 +286,195 @@ class AcceptLanguage(BaseModel):
             raise ValueError("Invalid language code: must follow RFC 5646 format (e.g., en-US, fr-FR)")
 
         return v
+
+
+class FetchUrl(BaseModel):
+    """
+    Validates URL input for web fetching functionality.
+
+    Security Controls:
+    - Length limit: max 2048 characters
+    - Scheme whitelist: http, https only
+    - Blocks: private/internal IPs, localhost, file://, ftp://, data:, SSRF
+    - Strips: URL fragments, auth components
+    """
+    url: str = Field(..., max_length=2048)
+
+    @validator('url')
+    def validate_url(cls, v):
+        """
+        Validate URL with comprehensive SSRF and security checks.
+        """
+        if not v or not isinstance(v, str):
+            raise ValueError("URL must be a non-empty string")
+
+        # Remove leading/trailing whitespace
+        v = v.strip()
+
+        # Check for null bytes
+        if '\x00' in v or '%00' in v:
+            raise ValueError("Invalid URL: null bytes not allowed")
+
+        # Check for newline/carriage return (header injection)
+        if '\r' in v or '\n' in v or '%0d' in v.lower() or '%0a' in v.lower():
+            raise ValueError("Invalid URL: newline characters not allowed")
+
+        # Enforce max length (before parsing, to prevent DoS)
+        if len(v) > 2048:
+            raise ValueError("Invalid URL: exceeds maximum length of 2048 characters")
+
+        # Parse URL using urllib.parse
+        try:
+            parsed = urllib.parse.urlparse(v)
+        except Exception as e:
+            raise ValueError(f"Invalid URL format: {e}")
+
+        # Scheme whitelist: only http and https allowed
+        allowed_schemes = ['http', 'https']
+        if parsed.scheme.lower() not in allowed_schemes:
+            raise ValueError(f"Invalid URL: only http and https schemes allowed (got: {parsed.scheme})")
+
+        # Reject blocked schemes explicitly (defense in depth)
+        blocked_schemes = ['file', 'ftp', 'data', 'javascript', 'mailto', 'ssh', 'telnet']
+        if parsed.scheme.lower() in blocked_schemes:
+            raise ValueError(f"Invalid URL: {parsed.scheme}:// scheme is not allowed")
+
+        # Ensure netloc exists (http:// requires a host)
+        if not parsed.netloc:
+            raise ValueError("Invalid URL: missing host")
+
+        # Strip auth components - rebuild URL without username:password
+        # netloc may contain username:password@host:port
+        # We need to extract just host:port
+        netloc_no_auth = parsed.netloc
+        if '@' in parsed.netloc:
+            # Strip username:password@ from netloc
+            netloc_no_auth = parsed.netloc.split('@')[1]
+
+        # Strip fragments - rebuild URL without #fragment and without auth
+        sanitized = urllib.parse.ParseResult(
+            scheme=parsed.scheme,
+            netloc=netloc_no_auth,
+            path=parsed.path,
+            params=parsed.params,
+            query=parsed.query,
+            fragment=''  # Strip fragment
+        ).geturl()
+
+        # Extract hostname for validation
+        hostname = parsed.hostname
+
+        # If hostname is None, netloc was malformed
+        if hostname is None:
+            raise ValueError("Invalid URL: unable to extract hostname")
+
+        # Block localhost and local-only hostnames
+        blocked_hostnames = ['localhost', 'localhost.localdomain', 'ip6-localhost',
+                            'ip6-loopback', 'localhost6', 'localhost6.localdomain6']
+        if hostname.lower() in blocked_hostnames:
+            raise ValueError("Invalid URL: localhost and local hostnames are not allowed")
+
+        # Block 0.0.0.0 explicitly
+        if hostname == '0.0.0.0':
+            raise ValueError("Invalid URL: 0.0.0.0 is not allowed")
+
+        # Validate and check IP addresses for private ranges
+        try:
+            # Try to parse as IP address
+            addr = ip_address(hostname)
+
+            # Block private IP ranges (RFC 1918, RFC 4193, loopback, link-local)
+            if isinstance(addr, IPv4Address):
+                # IPv4 private ranges
+                if addr.is_private:
+                    raise ValueError("Invalid URL: private IP addresses not allowed (RFC 1918)")
+                # Loopback
+                if addr.is_loopback:
+                    raise ValueError("Invalid URL: loopback addresses not allowed (127.0.0.0/8)")
+                # Link-local
+                if addr.is_link_local:
+                    raise ValueError("Invalid URL: link-local addresses not allowed (169.254.0.0/16)")
+                # Reserved
+                if addr.is_reserved:
+                    raise ValueError("Invalid URL: reserved IP addresses not allowed")
+            elif isinstance(addr, IPv6Address):
+                # IPv6 private ranges
+                if addr.is_private:
+                    raise ValueError("Invalid URL: private IPv6 addresses not allowed (fc00::/7)")
+                # Loopback
+                if addr.is_loopback:
+                    raise ValueError("Invalid URL: IPv6 loopback not allowed (::1)")
+                # Link-local
+                if addr.is_link_local:
+                    raise ValueError("Invalid URL: IPv6 link-local not allowed (fe80::/10)")
+                # Reserved
+                if addr.is_reserved:
+                    raise ValueError("Invalid URL: reserved IPv6 addresses not allowed")
+        except ValueError:
+            # Not an IP address, it's a hostname - continue with hostname validation
+            pass
+
+        # DNS rebinding protection: check for internal hostnames that might resolve to internal IPs
+        suspicious_patterns = [
+            r'\binternal\b',
+            r'\bintranet\b',
+            r'\bprivate\b',
+            r'\blocal\b',
+            r'\bad\b',  # Active Directory domain
+            r'\bcorp\b',
+            r'\bdev\b',
+            r'\btest\b',
+            r'\bstaging\b',
+        ]
+
+        hostname_lower = hostname.lower()
+        for pattern in suspicious_patterns:
+            if re.search(pattern, hostname_lower):
+                # Allow if it's a well-known public domain with these words
+                # (e.g., 'developer.mozilla.org' is okay)
+                public_domains = ['developer.mozilla.org', 'developers.google.com',
+                                'docs.python.org', 'localhost', 'local']
+                if not any(public in hostname_lower for public in public_domains):
+                    # More lenient check - only block if it looks like an internal hostname
+                    # (has no TLD or has an internal-like TLD)
+                    if '.' in hostname and not hostname_lower.split('.')[-1] in ['com', 'org', 'net', 'io', 'co', 'gov', 'edu', 'info', 'biz']:
+                        if hostname_lower.split('.')[-1] in ['local', 'internal', 'private', 'corp', 'intranet']:
+                            raise ValueError(f"Invalid URL: internal-looking hostname not allowed")
+
+        # Check for IP address in URL path/query (potential SSRF bypass)
+        # Some proxies might rewrite host headers based on path content
+        ip_in_url = re.search(r'//(localhost|127\.|10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.|0\.0\.0\.0)', v.lower())
+        if ip_in_url:
+            raise ValueError("Invalid URL: IP address detected in URL")
+
+        # Check for common SSRF bypass patterns
+        ssrf_bypasses = [
+            r'@localhost',          # http://user@localhost/
+            r'@127\.0\.0\.1',       # http://user@127.0.0.1/
+            r'@0\.0\.0\.0',         # http://user@0.0.0.0/
+            r'@169\.254\.',         # http://user@169.254.1.1/
+            r'::1',                 # IPv6 loopback
+            r'\[::1\]',             # Bracketed IPv6 loopback
+            r'\[::\]',              # IPv6 unspecified
+            r'\[fc00:',             # ULA prefix
+        ]
+
+        for pattern in ssrf_bypasses:
+            if re.search(pattern, v.lower()):
+                raise ValueError("Invalid URL: SSRF bypass pattern detected")
+
+        # Check for URL encoding bypass attempts
+        if '%2f' in v.lower() or '%5c' in v.lower():
+            raise ValueError("Invalid URL: encoded path separators not allowed")
+
+        # Check for command injection in URL
+        command_chars = [';', '&', '|', '`', '$']
+        # Allow & in query string (normal URL syntax)
+        # Allow ; in params (rare but valid)
+        # Check only in scheme/host area for suspicious characters
+        scheme_host = v.split('/')[2] if '://' in v else ''
+        if any(char in scheme_host for char in [';', '|', '`', '$']):
+            raise ValueError("Invalid URL: shell metacharacters not allowed in host")
+
+        # Return the sanitized URL (without fragment or auth)
+        return sanitized
