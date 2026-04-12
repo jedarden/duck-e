@@ -754,7 +754,7 @@ async def handle_media_stream(websocket: WebSocket):
 
     session.register_tool(
         name="web_fetch",
-        description="Fetch and extract content from a URL. For HTML pages, extracts visible text (scripts, styles, nav, footer, header, aside are stripped). For text/plain and application/json, returns raw content. Output truncated to 3000 characters.",
+        description="Fetch and read the content of a web page at a given URL. Returns the extracted text content. Use this when the user provides a specific URL they want you to read or summarize.",
         handler=web_fetch,
         parameters={
             "type": "object",
