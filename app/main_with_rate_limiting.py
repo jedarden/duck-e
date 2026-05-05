@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Annotated
 import httpx
 import json
-import meilisearch
 import os
 import requests
 import uuid
