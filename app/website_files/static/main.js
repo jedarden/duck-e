@@ -945,6 +945,7 @@ const toggleConnection = async () => {
       webRTC.onDisconnect = () => {
         updateUI("disconnected");
         connectionStatus = false;
+        resetCostState(); // Clear stale cost data on disconnect
       };
 
       // Set up message handler for transcript
@@ -969,6 +970,7 @@ const toggleConnection = async () => {
       console.error("Connection error:", error);
       updateUI("disconnected");
       connectionStatus = false;
+      resetCostState(); // Clear any partial cost state on failed connection
 
       // Show error notification
       alert("Failed to connect to DUCK-E. Please check your microphone permissions and try again.");
@@ -980,6 +982,7 @@ const toggleConnection = async () => {
     }
     updateUI("disconnected");
     connectionStatus = false;
+    resetCostState(); // Clear stale cost data on manual disconnect
   }
 };
 
