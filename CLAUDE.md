@@ -106,6 +106,9 @@ Uses `gpt-realtime-1.5` for voice sessions. Config generated in `app/config.py`:
 ## Testing
 
 ```bash
+# Install dev dependencies
+pip install -r requirements-dev.txt
+
 # Run tests
 pytest
 
@@ -115,9 +118,10 @@ pytest tests/security/
 
 ## Deployment
 
-- ArgoCD WorkflowTemplate: `duck-e-build` → Docker image → `ghcr.io/jedarden/duck-e`
-- Production: behind oauth2-proxy or Tailscale auth for header injection
-- Prometheus metrics: `/metrics`
+- **CI/CD**: ArgoCD WorkflowTemplate `duck-e-build` in iad-ci cluster → Docker image → `ghcr.io/jedarden/duck-e`
+- **Production cluster**: apexalgo-iad (accessed via kubectl-proxy over Tailscale)
+- **Auth**: Behind oauth2-proxy or Tailscale auth for header injection
+- **Metrics**: Prometheus metrics at `/metrics`
 
 ## Common Gotchas
 
