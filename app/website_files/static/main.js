@@ -79,6 +79,24 @@ const updateCostFromResponse = (usage) => {
 
 let costPanelListenerAttached = false;
 
+// Reset cost tracking state (call on reconnect)
+const resetCostState = () => {
+  sessionCost = {
+    startTime: null,
+    totalInputTextTokens: 0,
+    totalInputAudioTokens: 0,
+    totalOutputTextTokens: 0,
+    totalOutputAudioTokens: 0,
+    totalCachedTokens: 0,
+    backendInputTokens: 0,
+    backendOutputTokens: 0,
+  };
+  const panel = document.getElementById('cost-panel');
+  const el = document.getElementById('cost-display');
+  if (panel) panel.style.display = 'none';
+  if (el) el.style.display = 'none';
+};
+
 const updateCostDisplay = (totalCost, hourlyRate, costs, elapsedMs) => {
   const el = document.getElementById('cost-display');
   const panel = document.getElementById('cost-panel');
@@ -916,6 +934,9 @@ const toggleConnection = async () => {
   if (!connectionStatus) {
     // User is attempting to connect.
     updateUI("connecting");
+
+    // Reset cost tracking state for new session
+    resetCostState();
 
     try {
       webRTC = new ag2client.WebRTC(socketUrl);

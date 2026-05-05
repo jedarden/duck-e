@@ -6,7 +6,7 @@ DUCK-E is a real-time voice assistant built on:
 - **Backend**: FastAPI (Python) with AG2 (AutoGen) `RealtimeAgent` for orchestrating OpenAI Realtime API sessions
 - **Frontend**: Vanilla JS + WebRTC via bundled `ag2client.js`
 - **Model**: `gpt-realtime` (configured via AG2's `config_list` system)
-- **Tools**: Weather (current + forecast via WeatherAPI), Web Search (via OpenAI Responses API)
+- **Tools**: Weather (current + forecast via WeatherAPI), Web Search (via OpenAI Responses API), Web Fetch (planned — fetch and extract content from a URL)
 - **Auth**: Skeleton JWT middleware exists but no OAuth provider is integrated
 - **No memory system** exists today
 
@@ -368,7 +368,115 @@ Use save_memory when you learn preferences or important information about the us
 
 ---
 
-## Change 5: Agentation Library Integration
+## Change 5: Web Fetch Tool
+
+### Motivation
+
+The existing `web_search` tool finds information via OpenAI's Responses API, but the user cannot ask DUCK-E to read a specific URL they already have. A `web_fetch` tool complements web search by retrieving and extracting readable content from a given URL — useful for summarizing articles, reading documentation, or pulling data from a known page.
+
+### Design
+
+Register a `web_fetch` tool alongside the existing `web_search` tool. The user can say things like *"Read this article for me: https://example.com/post"* or *"What does this page say?"* and DUCK-E fetches the content, extracts the text, and summarizes it.
+
+### Implementation
+
+1. **Fetch** the URL using `httpx.AsyncClient` with a reasonable timeout (15s) and a browser-like `User-Agent`
+2. **Extract text** from HTML using `beautifulsoup4` (`BeautifulSoup` with `html.parser`) — strip nav, script, style, and footer elements, then extract visible text
+3. **Truncate** to 3000 characters to stay within realtime session context limits
+4. **Validate** the URL for safety before fetching
+
+### URL Validation & Security
+
+- Only allow `http` and `https` schemes — reject `file://`, `ftp://`, `data:`, etc.
+- Block private/internal IP ranges (`10.x`, `172.16-31.x`, `192.168.x`, `127.x`, `169.254.x`, `::1`, `fc00::/7`) to prevent SSRF
+- Resolve the hostname before connecting and verify the resolved IP is not private
+- Reject URLs longer than 2048 characters
+- Follow redirects (up to 5) but re-validate each hop's resolved IP
+- Set `Content-Type` accept header to prefer `text/html`
+
+### Input Validation
+
+Add a `FetchUrl` validator in `app/models/validators.py` (alongside the existing `SearchQuery`):
+- Validate URL format via `urllib.parse.urlparse`
+- Enforce scheme whitelist (`http`, `https`)
+- Strip fragments and authentication components (`user:pass@`)
+- Block known-bad patterns (e.g., `localhost`, `0.0.0.0`)
+
+### Tool Definition
+
+```python
+session.register_tool(
+    name="web_fetch",
+    description="Fetch and read the content of a web page at a given URL. Returns the extracted text content. Use this when the user provides a specific URL they want you to read or summarize.",
+    handler=web_fetch,
+    parameters={
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "The full URL to fetch (must be http or https)"
+            }
+        },
+        "required": ["url"]
+    }
+)
+```
+
+### Handler Implementation
+
+```python
+async def web_fetch(url: Annotated[str, "url"]) -> str:
+    validated = FetchUrl(url=url)
+    safe_url = str(validated.url)
+
+    async with httpx.AsyncClient(
+        timeout=15.0,
+        follow_redirects=True,
+        max_redirects=5,
+        headers={
+            "User-Agent": "DUCK-E/1.0 (voice assistant; +https://github.com/jedarden/duck-e)",
+            "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9",
+        },
+    ) as client:
+        resp = await client.get(safe_url)
+        resp.raise_for_status()
+
+    content_type = resp.headers.get("content-type", "")
+    if "text/html" in content_type:
+        soup = BeautifulSoup(resp.text, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+    elif "text/plain" in content_type or "application/json" in content_type:
+        text = resp.text
+    else:
+        return f"Unsupported content type: {content_type}"
+
+    if len(text) > 3000:
+        text = text[:3000] + "\n\n[Content truncated — page had more text]"
+
+    return text
+```
+
+### Dependencies
+
+Add `beautifulsoup4` to `requirements.txt`. `httpx` is already a dependency (used by `RealtimeSession`).
+
+### Cost Tracking
+
+Web fetch calls should be tracked via the existing `cost_tracker` for observability, even though they don't consume OpenAI tokens directly. Log the URL, response size, and latency.
+
+### Files to Create/Modify
+
+| File | Change |
+|------|--------|
+| `requirements.txt` | Add `beautifulsoup4` |
+| `app/main.py` | Add `web_fetch` handler function and register the tool with the session |
+| `app/models/validators.py` | Add `FetchUrl` validator with URL scheme/IP validation |
+
+---
+
+## Change 6: Agentation Library Integration
 
 ### What Agentation Does
 
@@ -428,7 +536,7 @@ Since DUCK-E's frontend is vanilla JS (not React), we need to either:
 
 ---
 
-## Change 6: Footer/Version Pushed Below Fold
+## Change 7: Footer/Version Pushed Below Fold
 
 ### Current Behavior
 
@@ -487,7 +595,7 @@ The footer with version badge and GitHub link is always visible at the bottom of
 
 ---
 
-## Change 7: Tool Call Display in Chat + Button Design Consistency
+## Change 8: Tool Call Display in Chat + Button Design Consistency
 
 ### Tool Call Display
 
@@ -634,7 +742,7 @@ Apply this system to all interactive elements: Connect, Disconnect, Mute, PTT to
 
 ---
 
-## Change 8: Estimated Hourly Cost Display
+## Change 9: Estimated Hourly Cost Display
 
 ### gpt-realtime-1.5 Pricing
 
@@ -852,24 +960,26 @@ Phase 1 — Foundation (no visible changes yet)
 Phase 2 — Backend Features
   3. Change 4: Memory system (needs RealtimeSession for tool registration)
   4. Change 3: Voice change tool (needs RealtimeSession + reinit protocol)
+  5. Change 5: Web fetch tool (needs RealtimeSession; complements existing web_search)
 
 Phase 3 — Frontend
-  5. Change 7: Tool call display + button consistency
-  6. Change 8: Cost display (depends on Change 7 for consistent UI patterns)
-  7. Change 6: Footer/layout changes
-  8. Change 5: Agentation integration
+  6. Change 8: Tool call display + button consistency
+  7. Change 9: Cost display (depends on Change 8 for consistent UI patterns)
+  8. Change 7: Footer/layout changes
+  9. Change 6: Agentation integration
 ```
 
 ### Risk Notes
 
 - **Change 1** is the riskiest — it replaces the core session management. Must verify the exact WebSocket message protocol AG2's RealtimeAgent uses by tracing actual messages.
 - **Change 3** requires client-side reconnection logic, which is complex. The WebRTC peer connection teardown/rebuild needs careful handling of audio state.
-- **Change 5** introduces React as a dependency for a single component. If Agentation's UMD bundle size is too large, consider lazy-loading it.
+- **Change 5** (web fetch) introduces SSRF risk if URL validation is incomplete. The IP resolution check before connecting is critical — must validate resolved IPs on every redirect hop, not just the initial hostname.
+- **Change 6** introduces React as a dependency for a single component. If Agentation's UMD bundle size is too large, consider lazy-loading it.
 - **Change 2** depends on `gpt-realtime-1.5` being a valid model identifier at OpenAI. Verify before implementing.
 
 ### Testing Strategy
 
 - Each phase should be testable independently
 - Phase 1: Verify WebSocket connects, audio streams, tools execute
-- Phase 2: Verify memory persists across sessions, voice changes seamlessly
+- Phase 2: Verify memory persists across sessions, voice changes seamlessly, web fetch returns readable content for common sites and rejects private/internal URLs
 - Phase 3: Verify tool calls render, layout scrolls correctly, Agentation toolbar loads

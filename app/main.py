@@ -10,7 +10,6 @@ from typing import Annotated
 import asyncio
 import httpx
 import json
-import meilisearch
 import os
 import requests
 import socket

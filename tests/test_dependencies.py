@@ -59,12 +59,12 @@ class TestDependencyCompatibility:
             "uvicorn",
             "websockets",
             "jinja2",
-            "meilisearch",
             "openai",
             "requests",
             "slowapi",
             "prometheus_client",
             "pydantic",
+            "beautifulsoup4",
         ]
 
         failed_imports = []
