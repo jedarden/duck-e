@@ -622,6 +622,8 @@ async def handle_media_stream(websocket: WebSocket):
         Fetch content from a URL with SSRF protection.
         Extracts visible text from HTML, returns raw text for text/plain and application/json.
         Truncates output to 3000 characters.
+
+        SSRF Protection: Validates IP addresses on EVERY redirect hop, not just the initial URL.
         """
         try:
             # Validate and sanitize URL
@@ -642,6 +644,45 @@ async def handle_media_stream(websocket: WebSocket):
             parsed = urlparse(safe_url)
             initial_hostname = parsed.hostname
 
+            async def validate_redirect_hop(response: httpx.Response) -> None:
+                """
+                Event hook to validate each redirect hop before following.
+                Raises httpx.HTTPStatusError if redirect target resolves to a private IP.
+                Called by httpx for each redirect response (3xx status codes).
+                """
+                if response.is_redirect and response.next_request:
+                    redirect_url = str(response.next_request.url)
+                    redirect_hostname = urlparse(redirect_url).hostname
+
+                    if redirect_hostname:
+                        try:
+                            loop = asyncio.get_event_loop()
+                            redirect_ip = await loop.run_in_executor(
+                                None,
+                                lambda: socket.gethostbyname(redirect_hostname)
+                            )
+                            if _is_private_ip(redirect_ip):
+                                logger.warning(json.dumps({
+                                    "event": "web_fetch.redirect_ssrf_blocked",
+                                    "original_url": safe_url,
+                                    "redirect_url": redirect_url,
+                                    "hostname": redirect_hostname,
+                                    "ip": redirect_ip,
+                                    "ts": time.time()
+                                }))
+                                raise httpx.HTTPStatusError(
+                                    f"Redirect to private IP blocked: {redirect_hostname} -> {redirect_ip}",
+                                    request=response.request,
+                                    response=response
+                                )
+                        except socket.gaierror as e:
+                            logger.warning(f"DNS resolution failed for redirect hostname: {redirect_hostname}")
+                            raise httpx.HTTPStatusError(
+                                f"Failed to resolve redirect hostname: {redirect_hostname}",
+                                request=response.request,
+                                response=response
+                            )
+
             if initial_hostname:
                 # Resolve initial hostname to IP and check if private
                 try:
@@ -656,7 +697,14 @@ async def handle_media_stream(websocket: WebSocket):
                     logger.warning(f"DNS resolution failed for hostname: {initial_hostname}")
                     return json.dumps({"error": "Failed to resolve hostname"})
 
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True, max_redirects=5) as client:
+            # Event hooks for redirect validation
+            event_hooks = {"response": [validate_redirect_hop]}
+            async with httpx.AsyncClient(
+                timeout=15.0,
+                follow_redirects=True,
+                max_redirects=5,
+                event_hooks=event_hooks
+            ) as client:
                 response = await client.get(safe_url, headers=headers)
 
             t_response = time.monotonic()
