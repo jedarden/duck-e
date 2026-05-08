@@ -93,11 +93,11 @@ session.register_tool(
 
 ## Model Configuration
 
-Uses `gpt-realtime-1.5` for voice sessions. Config generated in `app/config.py`:
+Uses `gpt-realtime-2` for voice sessions. Config generated in `app/config.py`:
 
 ```python
 {
-    "model": "gpt-realtime-1.5",
+    "model": "gpt-realtime-2",
     "api_key": os.getenv("OPENAI_API_KEY"),
     "voice": "alloy",  # changeable via tool
 }

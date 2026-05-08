@@ -7,7 +7,7 @@ let streamingResponse = null; // Track current streaming response { index, conte
 let currentTurnUserTranscript = ''; // Last user utterance for memory extraction
 let currentTurnAssistantTranscript = ''; // Current assistant response for memory extraction
 
-// Cost tracking state (gpt-realtime-1.5 + backend APIs)
+// Cost tracking state (gpt-realtime-2 + backend APIs)
 let sessionCost = {
   startTime: null,
   totalInputTextTokens: 0,
@@ -19,7 +19,7 @@ let sessionCost = {
   backendOutputTokens: 0,
 };
 
-// Pricing constants for gpt-realtime-1.5 (per token)
+// Pricing constants for gpt-realtime-2 (per token)
 const PRICING = {
   textInput:     4.00 / 1_000_000,
   textOutput:   16.00 / 1_000_000,

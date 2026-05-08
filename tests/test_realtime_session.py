@@ -28,7 +28,7 @@ class TestVoiceChange:
         """Create a RealtimeSession for testing."""
         return RealtimeSession(
             websocket=mock_websocket,
-            model="gpt-realtime-1.5",
+            model="gpt-realtime-2",
             api_key="test-key",  # pragma: allowlist secret
             system_message="You are a test assistant.",
             voice="alloy",
@@ -119,7 +119,7 @@ class TestVoiceChangeMessageFormat:
         """Create a RealtimeSession for testing."""
         return RealtimeSession(
             websocket=mock_websocket,
-            model="gpt-realtime-1.5",
+            model="gpt-realtime-2",
             api_key="test-key",  # pragma: allowlist secret
             system_message="You are a test assistant.",
             voice="alloy",

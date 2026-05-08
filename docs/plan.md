@@ -47,7 +47,7 @@ The ephemeral key endpoint returns a response like:
 {
   "id": "sess_...",
   "client_secret": {"value": "ek_...", "expires_at": 1234567890},
-  "model": "gpt-realtime-1.5",
+  "model": "gpt-realtime-2",
   ...
 }
 ```
@@ -192,19 +192,19 @@ Or use a decorator wrapper that mirrors the old API for minimal diff.
 
 ---
 
-## Change 2: Replace Model with `gpt-realtime-1.5`
+## Change 2: Replace Model with `gpt-realtime-2`
 
 ### Files to Modify
 
 | File | Change |
 |------|--------|
-| `app/config.py` | Change `"model": "gpt-realtime"` → `"model": "gpt-realtime-1.5"` |
-| `app/realtime_session.py` | Default model parameter = `"gpt-realtime-1.5"` |
+| `app/config.py` | Change `"model": "gpt-realtime"` → `"model": "gpt-realtime-2"` |
+| `app/realtime_session.py` | Default model parameter = `"gpt-realtime-2"` |
 
 ### Notes
 - The model name is passed to OpenAI's `/v1/realtime/sessions` endpoint and to the WebRTC SDP negotiation URL (`https://api.openai.com/v1/realtime?model=...`)
 - `ag2client.js` already reads the model from the init config (`data.model`), so no client change needed
-- Verify the model name is exactly what OpenAI expects (check API docs for `gpt-realtime-1.5` vs `gpt-4o-realtime-preview-2024-12-17` etc.)
+- Verify the model name is exactly what OpenAI expects (check API docs for `gpt-realtime-2` vs `gpt-4o-realtime-preview-2024-12-17` etc.)
 
 ---
 
@@ -744,7 +744,7 @@ Apply this system to all interactive elements: Connect, Disconnect, Mute, PTT to
 
 ## Change 9: Estimated Hourly Cost Display
 
-### gpt-realtime-1.5 Pricing
+### gpt-realtime-2 Pricing
 
 | Token Type | Input (per 1M) | Cached Input (per 1M) | Output (per 1M) |
 |------------|----------------|----------------------|-----------------|
@@ -854,7 +854,7 @@ let sessionCost = {
   totalCachedTokens: 0,
 };
 
-// Pricing constants (gpt-realtime-1.5)
+// Pricing constants (gpt-realtime-2)
 const PRICING = {
   textInput: 4.00 / 1_000_000,
   textOutput: 16.00 / 1_000_000,
@@ -955,7 +955,7 @@ The changes have dependencies and should be implemented in this order:
 ```
 Phase 1 — Foundation (no visible changes yet)
   1. Change 1: Remove AG2 → create RealtimeSession
-  2. Change 2: Switch to gpt-realtime-1.5
+  2. Change 2: Switch to gpt-realtime-2
 
 Phase 2 — Backend Features
   3. Change 4: Memory system (needs RealtimeSession for tool registration)
@@ -975,7 +975,7 @@ Phase 3 — Frontend
 - **Change 3** requires client-side reconnection logic, which is complex. The WebRTC peer connection teardown/rebuild needs careful handling of audio state.
 - **Change 5** (web fetch) introduces SSRF risk if URL validation is incomplete. The IP resolution check before connecting is critical — must validate resolved IPs on every redirect hop, not just the initial hostname.
 - **Change 6** introduces React as a dependency for a single component. If Agentation's UMD bundle size is too large, consider lazy-loading it.
-- **Change 2** depends on `gpt-realtime-1.5` being a valid model identifier at OpenAI. Verify before implementing.
+- **Change 2** depends on `gpt-realtime-2` being a valid model identifier at OpenAI. Verify before implementing.
 
 ### Testing Strategy
 

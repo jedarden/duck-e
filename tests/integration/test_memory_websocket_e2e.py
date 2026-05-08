@@ -66,7 +66,7 @@ def mock_ephemeral_key_response():
         "client_secret": {
             "value": "test-ephemeral-key"
         },
-        "model": "gpt-realtime-1.5"
+        "model": "gpt-realtime-2"
     }
 
 

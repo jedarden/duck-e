@@ -203,7 +203,7 @@ class TestOnTurnDoneCallback:
 
         session = RealtimeSession(
             websocket=mock_websocket,
-            model="gpt-realtime-1.5",
+            model="gpt-realtime-2",
             api_key="test-key",  # pragma: allowlist secret
             system_message="Test",
             on_turn_done=fake_callback,
@@ -222,7 +222,7 @@ class TestOnTurnDoneCallback:
         # Patch _get_ephemeral_key so run() doesn't hit OpenAI
         with patch.object(session, "_get_ephemeral_key", new=AsyncMock(return_value={
             "client_secret": {"value": "fake-secret"},
-            "model": "gpt-realtime-1.5",
+            "model": "gpt-realtime-2",
         })):
             await session.run()
 
@@ -237,7 +237,7 @@ class TestOnTurnDoneCallback:
         """No on_turn_done set → ducke.turn_done is silently ignored."""
         session = RealtimeSession(
             websocket=mock_websocket,
-            model="gpt-realtime-1.5",
+            model="gpt-realtime-2",
             api_key="test-key",  # pragma: allowlist secret
             system_message="Test",
             on_turn_done=None,
@@ -254,7 +254,7 @@ class TestOnTurnDoneCallback:
 
         with patch.object(session, "_get_ephemeral_key", new=AsyncMock(return_value={
             "client_secret": {"value": "fake-secret"},
-            "model": "gpt-realtime-1.5",
+            "model": "gpt-realtime-2",
         })):
             await session.run()  # Must not raise
 
@@ -269,7 +269,7 @@ class TestOnTurnDoneCallback:
 
         session = RealtimeSession(
             websocket=mock_websocket,
-            model="gpt-realtime-1.5",
+            model="gpt-realtime-2",
             api_key="test-key",  # pragma: allowlist secret
             system_message="Test",
             on_turn_done=slow_callback,
@@ -286,7 +286,7 @@ class TestOnTurnDoneCallback:
 
         with patch.object(session, "_get_ephemeral_key", new=AsyncMock(return_value={
             "client_secret": {"value": "fake-secret"},
-            "model": "gpt-realtime-1.5",
+            "model": "gpt-realtime-2",
         })):
             await session.run()
 
