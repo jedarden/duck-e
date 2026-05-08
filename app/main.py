@@ -190,7 +190,9 @@ async def start_chat(request: Request):
     Rate limit: 30 requests per minute per IP
     """
     port = request.url.port
-    return templates.TemplateResponse("chat.html", {"request": request, "port": port, "version": APP_VERSION})
+    realtime_configs = get_realtime_config()
+    realtime_model = realtime_configs[0]["model"] if realtime_configs else "unknown"
+    return templates.TemplateResponse("chat.html", {"request": request, "port": port, "version": APP_VERSION, "model": realtime_model})
 
 
 @app.websocket("/session")
