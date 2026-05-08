@@ -1269,19 +1269,6 @@
             font-family: 'Fira Code', 'Consolas', monospace;
         }
 
-        .model-badge {
-            display: inline-block;
-            margin-top: 6px;
-            padding: 3px 10px;
-            background: rgba(79, 70, 229, 0.12);
-            border: 1px solid rgba(99, 102, 241, 0.35);
-            border-radius: 10px;
-            font-size: 0.72rem;
-            color: var(--primary-light);
-            font-family: 'Fira Code', 'Consolas', monospace;
-            letter-spacing: 0.02em;
-        }
-
         /* Cost display button (in inline-controls) */
         #cost-display {
             display: none;
@@ -1395,6 +1382,7 @@
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const socketUrl = `${protocol}://${window.location.host}/session`;
         const APP_VERSION = '{{ version }}';
+        const APP_MODEL = '{{ model }}';
     </script>
     <!-- React 18 + Agentation annotation tool (ESM only — no UMD) -->
     <!-- importmap must appear before any type="module" scripts -->
@@ -1432,7 +1420,6 @@
             <div class="title-container">
                 <h1>DUCK-E</h1>
                 <p class="subtitle">Digitally Unified Conversational Knowledge Engine</p>
-                <span class="model-badge">{{ model }}</span>
             </div>
         </header>
 

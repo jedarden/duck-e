@@ -121,6 +121,7 @@ const updateCostDisplay = (totalCost, hourlyRate, costs, elapsedMs) => {
       <div class="cost-summary-row">
         <div class="cost-item"><span>Duration</span><span>${duration}</span></div>
         <div class="cost-item"><span>Session Total</span><span>${fmt(totalCost)}</span></div>
+        <div class="cost-item"><span>Model</span><span class="cost-val" style="font-family:'Fira Code',monospace;font-size:0.75em">${typeof APP_MODEL !== 'undefined' ? APP_MODEL : ''}</span></div>
       </div>
       <hr class="cost-divider">
       <div class="cost-grid">
