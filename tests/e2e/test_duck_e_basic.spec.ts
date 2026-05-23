@@ -17,7 +17,7 @@ test.describe('DUCK-E Basic Tests', () => {
     await page.goto(baseUrl);
     
     // Look for connect button
-    const connectButton = page.locator('#connect-button, button:has-text("Connect"), [data-testid="connect"]');
+    const connectButton = page.locator('#toggle-connection, button:has-text("Connect"), [data-testid="connect"]');
     await expect(connectButton.first()).toBeVisible({ timeout: 10000 });
   });
 
