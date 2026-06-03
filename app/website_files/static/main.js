@@ -695,7 +695,8 @@ const handleWebRTCMessage = (event) => {
     // Handle different message types from OpenAI Realtime API
 
     // Conversation item created - create placeholder in correct order
-    if (data.type === 'conversation.item.created') {
+    // gpt-realtime-2 uses 'conversation.item.added'; older models use 'conversation.item.created'
+    if (data.type === 'conversation.item.created' || data.type === 'conversation.item.added') {
       const item = data.item;
       if (item && item.id && item.role) {
         console.log('Conversation item created:', item.id, item.role);
@@ -718,7 +719,8 @@ const handleWebRTCMessage = (event) => {
       }
     }
     // Assistant's audio response transcript DELTA (streaming)
-    else if (data.type === 'response.audio_transcript.delta') {
+    // gpt-realtime-2 uses 'response.output_audio_transcript.delta'; older models use 'response.audio_transcript.delta'
+    else if (data.type === 'response.audio_transcript.delta' || data.type === 'response.output_audio_transcript.delta') {
       if (data.delta) {
         const itemId = data.item_id;
         // Start streaming if not already or if different item
@@ -730,7 +732,8 @@ const handleWebRTCMessage = (event) => {
       }
     }
     // Assistant's audio response transcript completed
-    else if (data.type === 'response.audio_transcript.done') {
+    // gpt-realtime-2 uses 'response.output_audio_transcript.done'; older models use 'response.audio_transcript.done'
+    else if (data.type === 'response.audio_transcript.done' || data.type === 'response.output_audio_transcript.done') {
       const itemId = data.item_id;
       if (data.transcript) {
         currentTurnAssistantTranscript = data.transcript; // Capture for memory extraction
