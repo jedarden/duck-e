@@ -338,9 +338,7 @@ var ag2client = (() => {
         });
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        const baseUrl = "https://api.openai.com/v1/realtime";
-        const model = data.model;
-        const sdpResponse = await fetch(`${baseUrl}?model=${model}`, {
+        const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
           method: "POST",
           body: offer.sdp,
           headers: {

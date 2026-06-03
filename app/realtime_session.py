@@ -70,28 +70,42 @@ class RealtimeSession:
 
     async def _get_ephemeral_key(self, voice: Optional[str] = None) -> dict[str, Any]:
         """
-        Call OpenAI /v1/realtime/sessions server-side to obtain a short-lived
-        ephemeral key.  Returns a SANITIZED config safe to send to the browser —
-        only client_secret and model are included; the real API key is never
-        forwarded.
+        Call OpenAI /v1/realtime/client_secrets to obtain a short-lived ephemeral
+        key for the gpt-realtime-2 WebRTC flow.  Returns a SANITIZED config safe
+        to send to the browser — only the ephemeral value and model are included;
+        the real API key is never forwarded.
         """
-        client = openai.AsyncOpenAI(api_key=self.api_key)
-        try:
-            session = await client.beta.realtime.sessions.create(
-                model=self.model,
-                voice=voice or self.voice,
-                instructions=self.system_message,
-                tools=self.tools,
-                input_audio_transcription={"model": "whisper-1"},
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/realtime/client_secrets",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "session": {
+                        "type": "realtime",
+                        "model": self.model,
+                        "audio": {
+                            "output": {"voice": voice or self.voice},
+                        },
+                        "instructions": self.system_message,
+                        "tools": self.tools,
+                    }
+                },
             )
-        except openai.APIError as e:
-            self.logger.error(f"OpenAI session create failed: {e.status_code} — {e.message}")
-            raise
+            if not resp.is_success:
+                self.logger.error(
+                    f"OpenAI client_secrets failed: {resp.status_code} — {resp.text}"
+                )
+            resp.raise_for_status()
+            data = resp.json()
+
         # SECURITY: Only return fields the client needs.
         # Never forward the raw response — it may contain server-side secrets.
         return {
-            "client_secret": {"value": session.client_secret.value},
-            "model": session.model,
+            "client_secret": {"value": data["value"]},
+            "model": self.model,
         }
 
     async def change_voice(self, voice: str) -> str:

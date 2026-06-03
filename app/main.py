@@ -179,16 +179,15 @@ async def health_openai():
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
-                "https://api.openai.com/v1/realtime/sessions",
+                "https://api.openai.com/v1/realtime/client_secrets",
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
-                    "OpenAI-Beta": "assistants=v2",
                 },
-                json={"model": model},
+                json={"session": {"type": "realtime", "model": model}},
             )
         if resp.is_success:
-            return JSONResponse({"status": "ok", "model": resp.json().get("model"), "version": APP_VERSION})
+            return JSONResponse({"status": "ok", "model": model, "version": APP_VERSION})
         return JSONResponse({"status": "error", "http_status": resp.status_code, "detail": resp.json()})
     except Exception as e:
         return JSONResponse({"status": "error", "detail": str(e)})
