@@ -89,6 +89,10 @@ class RealtimeSession:
                     "input_audio_transcription": {"model": "whisper-1"},
                 },
             )
+            if not resp.is_success:
+                self.logger.error(
+                    f"OpenAI session create failed: {resp.status_code} — {resp.text}"
+                )
             resp.raise_for_status()
             data = resp.json()
 
