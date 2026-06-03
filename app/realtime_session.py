@@ -138,6 +138,7 @@ class RealtimeSession:
                 "update": {
                     "type": "session.update",
                     "session": {
+                        "type": "realtime",
                         "voice": voice,
                     },
                 },

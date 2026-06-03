@@ -307,6 +307,7 @@ var ag2client = (() => {
             const transcriptionConfig = {
               type: "session.update",
               session: {
+                type: "realtime",
                 input_audio_transcription: {
                   model: "whisper-1"
                 }
