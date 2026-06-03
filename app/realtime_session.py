@@ -80,6 +80,7 @@ class RealtimeSession:
                 headers={
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
+                    "OpenAI-Beta": "assistants=v2",
                 },
                 json={
                     "model": self.model,
