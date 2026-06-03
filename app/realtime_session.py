@@ -88,6 +88,9 @@ class RealtimeSession:
                         "model": self.model,
                         "audio": {
                             "output": {"voice": voice or self.voice},
+                            "input": {
+                                "transcription": {"model": "whisper-1"},
+                            },
                         },
                         "instructions": self.system_message,
                         "tools": self.tools,
