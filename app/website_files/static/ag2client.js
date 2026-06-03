@@ -478,7 +478,6 @@ var ag2client = (() => {
             ) {
               const responseCreate = JSON.stringify({
                 type: "response.create",
-                response: { modalities: ["text", "audio"] },
               });
               dc.send(responseCreate);
               console.log("Sent response.create after function_call_output for call_id:", message.item.call_id);
