@@ -301,21 +301,8 @@ var ag2client = (() => {
             console.error("Error parsing message", e.data, error);
             return;
           }
-          // Enable input audio transcription after session is created
-          if (message.type === "session.created" && !transcriptionEnabled) {
-            transcriptionEnabled = true;
-            const transcriptionConfig = {
-              type: "session.update",
-              session: {
-                type: "realtime",
-                input_audio_transcription: {
-                  model: "whisper-1"
-                }
-              }
-            };
-            _dc.send(JSON.stringify(transcriptionConfig));
-            console.log("Enabled input audio transcription after session.created");
-          }
+          // input_audio_transcription is configured at session creation time
+          // (in the /v1/realtime/client_secrets request), not via session.update.
           // Forward all messages to onMessage callback for transcript handling
           if (webRTC.onMessage) {
             try {
