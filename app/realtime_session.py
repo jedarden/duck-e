@@ -6,6 +6,7 @@ Supports voice change via WebRTC session teardown and reinit.
 import asyncio
 import httpx
 import json
+import openai
 import time
 from logging import Logger, getLogger
 from typing import Any, Callable, Optional
@@ -74,34 +75,23 @@ class RealtimeSession:
         only client_secret and model are included; the real API key is never
         forwarded.
         """
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://api.openai.com/v1/realtime/sessions",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                    "OpenAI-Beta": "assistants=v2",
-                },
-                json={
-                    "model": self.model,
-                    "voice": voice or self.voice,
-                    "instructions": self.system_message,
-                    "tools": self.tools,
-                    "input_audio_transcription": {"model": "whisper-1"},
-                },
+        client = openai.AsyncOpenAI(api_key=self.api_key)
+        try:
+            session = await client.beta.realtime.sessions.create(
+                model=self.model,
+                voice=voice or self.voice,
+                instructions=self.system_message,
+                tools=self.tools,
+                input_audio_transcription={"model": "whisper-1"},
             )
-            if not resp.is_success:
-                self.logger.error(
-                    f"OpenAI session create failed: {resp.status_code} — {resp.text}"
-                )
-            resp.raise_for_status()
-            data = resp.json()
-
+        except openai.APIError as e:
+            self.logger.error(f"OpenAI session create failed: {e.status_code} — {e.message}")
+            raise
         # SECURITY: Only return fields the client needs.
         # Never forward the raw response — it may contain server-side secrets.
         return {
-            "client_secret": data["client_secret"],  # ephemeral key (short-lived)
-            "model": data.get("model", self.model),
+            "client_secret": {"value": session.client_secret.value},
+            "model": session.model,
         }
 
     async def change_voice(self, voice: str) -> str:
