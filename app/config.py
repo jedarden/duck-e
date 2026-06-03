@@ -50,7 +50,7 @@ def generate_oai_config_list() -> List[Dict[str, Any]]:
             "tags": ["gpt-5-full", "advanced"]
         },
         {
-            "model": "gpt-4o-realtime-preview",
+            "model": os.getenv("REALTIME_MODEL", "gpt-4o-realtime-preview"),
             "api_key": api_key,
             "tags": ["gpt-realtime", "voice"]
         }
