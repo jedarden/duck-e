@@ -91,9 +91,6 @@ class RealtimeSession:
                         },
                         "instructions": self.system_message,
                         "tools": self.tools,
-                        "input_audio_transcription": {
-                            "model": "whisper-1",
-                        },
                     }
                 },
             )
