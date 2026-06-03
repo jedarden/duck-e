@@ -171,6 +171,29 @@ async def index_page(request: Request):
     return JSONResponse({"message": "WebRTC DUCK-E Server is running!", "version": APP_VERSION})
 
 
+@app.get("/health/openai")
+async def health_openai():
+    """Test OpenAI realtime session creation. No auth — VPN entrypoint only."""
+    api_key = os.getenv("OPENAI_API_KEY", "")
+    model = os.getenv("REALTIME_MODEL", "gpt-4o-realtime-preview")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://api.openai.com/v1/realtime/sessions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "OpenAI-Beta": "assistants=v2",
+                },
+                json={"model": model},
+            )
+        if resp.is_success:
+            return JSONResponse({"status": "ok", "model": resp.json().get("model"), "version": APP_VERSION})
+        return JSONResponse({"status": "error", "http_status": resp.status_code, "detail": resp.json()})
+    except Exception as e:
+        return JSONResponse({"status": "error", "detail": str(e)})
+
+
 website_files_path = Path(__file__).parent / "website_files"
 
 app.mount(
