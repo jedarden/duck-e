@@ -101,32 +101,12 @@
             animation: slideDown 0.6s ease-out;
         }
 
-        /* Login button */
+        /* Login button container */
         .login-container {
             margin-left: auto;
             display: flex;
             align-items: center;
             gap: 10px;
-        }
-
-        .login-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
-            font-size: 0.9rem;
-            font-weight: 500;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .login-btn:hover {
-            background: var(--bg-tertiary);
-            border-color: var(--primary-light);
         }
 
         .login-btn .google-icon {
@@ -173,22 +153,6 @@
             color: var(--text-muted);
         }
 
-        .logout-btn {
-            padding: 6px 12px;
-            font-size: 0.8rem;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: var(--bg-secondary);
-            color: var(--text-muted);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .logout-btn:hover {
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-            border-color: var(--primary-light);
-        }
 
         @keyframes slideDown {
             from {
@@ -346,104 +310,13 @@
             color: var(--text-primary);
         }
 
-        /* Connect button - using unified .ducke-btn system */
-        #toggle-connection {
-            position: relative;
-            padding: 14px 44px;
-            font-size: 1.125rem;
-            font-weight: 600;
-            border: none;
-            border-radius: 12px;
-            background: linear-gradient(135deg, var(--primary), var(--primary-light));
-            color: white;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);
-            overflow: hidden;
-        }
 
-        #toggle-connection::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: -100%;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
-            transition: left 0.5s ease;
-        }
-
-        #toggle-connection:hover::before {
-            left: 100%;
-        }
-
-        #toggle-connection:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.5);
-        }
-
-        #toggle-connection:active {
-            transform: translateY(0);
-        }
-
-        #toggle-connection:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        #toggle-connection.connected {
-            background: linear-gradient(135deg, var(--danger), #DC2626);
-            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
-        }
-
-        #toggle-connection.connected:hover {
-            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
-        }
-
-        /* Audio controls */
+        /* Audio controls container */
         .audio-controls {
             display: flex;
             justify-content: center;
             gap: 15px;
             margin-top: 20px;
-        }
-
-        .audio-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 12px 24px;
-            font-size: 0.95rem;
-            font-weight: 500;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            background: var(--bg-secondary);
-            color: var(--text-secondary);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .audio-btn:hover:not(:disabled) {
-            background: var(--bg-tertiary);
-            border-color: var(--primary-light);
-            color: var(--text-primary);
-        }
-
-        .audio-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .audio-btn.muted {
-            background: rgba(239, 68, 68, 0.1);
-            border-color: var(--danger);
-            color: var(--danger);
-        }
-
-        .audio-btn .icon {
-            font-size: 1.2rem;
         }
 
         /* Push-to-talk controls */
@@ -504,40 +377,19 @@
             transform: translateX(24px);
         }
 
+        /* PTT button container styles */
         .ptt-btn {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
             width: 100%;
             max-width: 300px;
             padding: 18px 28px;
             font-size: 1.1rem;
             font-weight: 600;
             border: 2px solid var(--primary);
-            border-radius: 12px;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            cursor: pointer;
-            transition: all 0.2s ease;
             user-select: none;
         }
 
-        .ptt-btn.hidden {
-            display: none;
-        }
-
         .ptt-btn:hover {
-            background: var(--bg-tertiary);
             border-color: var(--primary-light);
-        }
-
-        .ptt-btn:active,
-        .ptt-btn.active {
-            background: var(--primary);
-            color: white;
-            transform: scale(0.98);
-            box-shadow: 0 0 20px rgba(79, 70, 229, 0.5);
         }
 
         .ptt-hint {
@@ -702,27 +554,11 @@
             gap: 8px;
         }
 
-        .clear-transcript-btn {
-            padding: 6px 12px;
-            font-size: 0.8rem;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: transparent;
-            color: var(--text-muted);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .clear-transcript-btn:hover {
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-            border-color: var(--primary-light);
-        }
-
         /* Unified button system */
         .ducke-btn {
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 8px;
             padding: 10px 20px;
             border: 1px solid var(--border);
@@ -746,6 +582,34 @@
             cursor: not-allowed;
         }
 
+        /* Button size variants */
+        .ducke-btn--xs {
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            border-radius: 6px;
+        }
+
+        .ducke-btn--sm {
+            padding: 6px 12px;
+            font-size: 0.8rem;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-muted);
+        }
+
+        .ducke-btn--sm:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border-color: var(--primary-light);
+        }
+
+        .ducke-btn--lg {
+            padding: 14px 44px;
+            font-size: 1.125rem;
+            font-weight: 600;
+        }
+
+        /* Button style variants */
         .ducke-btn--primary {
             background: var(--primary);
             border-color: var(--primary);
@@ -767,17 +631,61 @@
             background: rgba(239, 68, 68, 0.2);
         }
 
-        .ducke-btn--sm {
-            padding: 6px 12px;
-            font-size: 12px;
-            border-radius: 8px;
+        /* Accent gradient button (for main connect button) */
+        .ducke-btn--accent {
+            position: relative;
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+            border: none;
+            color: white;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);
+            overflow: hidden;
         }
 
+        .ducke-btn--accent::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: left 0.5s ease;
+        }
+
+        .ducke-btn--accent:hover::before {
+            left: 100%;
+        }
+
+        .ducke-btn--accent:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.5);
+            background: linear-gradient(135deg, var(--primary), var(--primary-light));
+        }
+
+        .ducke-btn--accent:active {
+            transform: translateY(0);
+        }
+
+        .ducke-btn--accent.connected {
+            background: linear-gradient(135deg, var(--danger), #DC2626);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
+        }
+
+        .ducke-btn--accent.connected:hover {
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5);
+        }
+
+        /* Icon variants */
         .ducke-btn--icon {
             padding: 10px;
             border-radius: 50%;
         }
 
+        .ducke-btn .icon {
+            font-size: 1.2rem;
+        }
+
+        /* State modifiers */
         .ducke-btn.muted {
             background: rgba(239, 68, 68, 0.1);
             border-color: var(--danger);
@@ -788,6 +696,17 @@
             background: rgba(239, 68, 68, 0.1);
             border-color: var(--danger);
             color: var(--danger);
+        }
+
+        .ducke-btn.active {
+            background: var(--primary);
+            color: white;
+            transform: scale(0.98);
+            box-shadow: 0 0 20px rgba(79, 70, 229, 0.5);
+        }
+
+        .ducke-btn.hidden {
+            display: none;
         }
 
         /* Tool call cards in transcript - Enhanced visibility */
@@ -1360,7 +1279,7 @@
                 font-size: 0.95rem;
             }
 
-            #toggle-connection {
+            .ducke-btn--accent {
                 padding: 12px 30px;
                 font-size: 0.95rem;
             }
@@ -1369,18 +1288,13 @@
                 margin-top: 12px;
             }
 
-            .audio-btn {
-                padding: 10px 18px;
-                font-size: 0.85rem;
-            }
-
             .ptt-controls {
                 margin-top: 12px;
                 padding-top: 12px;
                 gap: 10px;
             }
 
-            .ptt-btn {
+            .ducke-btn--lg {
                 padding: 14px 20px;
                 font-size: 1rem;
             }
@@ -1486,9 +1400,8 @@
                 gap: 8px;
             }
 
-            .audio-btn {
+            .audio-controls .ducke-btn {
                 width: 100%;
-                justify-content: center;
             }
         }
 
@@ -1538,24 +1451,6 @@
             display: none;
         }
 
-        .cost-toggle-btn {
-            padding: 4px 8px;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: var(--bg-secondary);
-            color: var(--text-muted);
-            font-size: 0.78rem;
-            font-weight: 500;
-            white-space: nowrap;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .cost-toggle-btn:hover {
-            background: var(--bg-tertiary);
-            color: var(--text-secondary);
-            border-color: var(--primary-light);
-        }
 
         /* Cost panel: pops up above the inline-controls bar */
         #cost-panel {
@@ -1633,7 +1528,7 @@
             100% { opacity: 1; }
         }
 
-        .cost-flash .cost-toggle-btn {
+        .cost-flash .ducke-btn {
             animation: costFlash 0.4s ease;
         }
 
@@ -1724,13 +1619,13 @@
                     <div id="status-indicator" class="status-indicator disconnected"></div>
                     <div id="status-text" class="status-text">Ready to Connect</div>
                 </div>
-                <button id="toggle-connection">
+                <button id="toggle-connection" class="ducke-btn ducke-btn--accent ducke-btn--lg">
                     <span id="button-text">Connect</span>
                 </button>
 
                 <!-- Audio controls -->
                 <div class="audio-controls">
-                    <button id="mute-btn" class="audio-btn ducke-btn" disabled>
+                    <button id="mute-btn" class="ducke-btn" disabled>
                         <span class="icon" id="mute-icon">🔊</span>
                         <span id="mute-text">Mute</span>
                     </button>
@@ -1742,7 +1637,7 @@
                         <span class="ptt-toggle-label">Push-to-Talk Mode</span>
                         <input type="checkbox" id="ptt-toggle" class="ptt-toggle">
                     </div>
-                    <button id="ptt-btn" class="ptt-btn ducke-btn hidden">
+                    <button id="ptt-btn" class="ducke-btn ducke-btn--lg hidden">
                         <span>🎤</span>
                         <span>Hold to Talk</span>
                     </button>
@@ -1757,7 +1652,7 @@
                         <span>📝</span>
                         <span>Conversation</span>
                     </div>
-                    <button id="clear-transcript" class="clear-transcript-btn ducke-btn ducke-btn--sm">Clear</button>
+                    <button id="clear-transcript" class="ducke-btn ducke-btn--sm">Clear</button>
                 </div>
                 <div id="transcript-content" class="transcript-content">
                     <div class="transcript-empty">Conversation transcript will appear here...</div>

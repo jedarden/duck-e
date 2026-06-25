@@ -121,7 +121,7 @@ const updateCostDisplay = (totalCost, hourlyRate, costs, elapsedMs) => {
   const secs = Math.floor((elapsedMs % 60000) / 1000);
   const duration = `${mins}m ${secs.toString().padStart(2, '0')}s`;
 
-  el.innerHTML = `<button class="cost-toggle-btn">Est. ~${fmt(hourlyRate)}/hr</button>`;
+  el.innerHTML = `<button class="ducke-btn ducke-btn--xs">Est. ~${fmt(hourlyRate)}/hr</button>`;
 
   if (!costPanelListenerAttached) {
     el.addEventListener('click', () => panel.classList.toggle('open'));
