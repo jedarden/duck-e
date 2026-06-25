@@ -48,6 +48,21 @@ try:
 except ImportError:
     _auth_available = False
 
+# Google OAuth components (optional)
+try:
+    from .google_oauth import (
+        is_oauth_configured,
+        get_oauth_login_url,
+        initiate_login,
+        handle_callback,
+        get_user_info_from_token,
+        cleanup_expired_states,
+        cleanup_expired_sessions
+    )
+    _oauth_available = True
+except ImportError:
+    _oauth_available = False
+
 __all__ = [
     # Rate limiting
     "limiter",
@@ -91,4 +106,16 @@ if _auth_available:
         "get_current_user_optional",
         "refresh_access_token",
         "revoke_token"
+    ])
+
+# Add OAuth exports if available
+if _oauth_available:
+    __all__.extend([
+        "is_oauth_configured",
+        "get_oauth_login_url",
+        "initiate_login",
+        "handle_callback",
+        "get_user_info_from_token",
+        "cleanup_expired_states",
+        "cleanup_expired_sessions"
     ])

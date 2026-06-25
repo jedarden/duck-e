@@ -28,6 +28,23 @@ from app.middleware import (
     get_websocket_security_middleware
 )
 
+# Import Google OAuth (optional)
+try:
+    from app.middleware.google_oauth import (
+        is_oauth_configured,
+        get_oauth_login_url,
+        initiate_login,
+        handle_callback,
+        get_user_info_from_token,
+        cleanup_expired_states,
+        cleanup_expired_sessions
+    )
+    _oauth_available = True
+except ImportError:
+    _oauth_available = False
+    logger = getLogger("uvicorn.error")
+    logger.warning("Google OAuth module not available - authentication will rely on proxy headers")
+
 # Import cost protection middleware
 from app.middleware.cost_protection import (
     CostProtectionMiddleware,
@@ -214,7 +231,89 @@ async def start_chat(request: Request):
     port = request.url.port
     realtime_configs = get_realtime_config()
     realtime_model = realtime_configs[0]["model"] if realtime_configs else "unknown"
-    return templates.TemplateResponse("chat.html", {"request": request, "port": port, "version": APP_VERSION, "model": realtime_model})
+
+    # Check if OAuth is configured
+    oauth_configured = is_oauth_configured() if _oauth_available else False
+
+    return templates.TemplateResponse("chat.html", {
+        "request": request,
+        "port": port,
+        "version": APP_VERSION,
+        "model": realtime_model,
+        "oauth_configured": oauth_configured
+    })
+
+
+# Google OAuth Endpoints (if available)
+if _oauth_available:
+    @app.get("/auth/login")
+    async def auth_login(request: Request, redirect_uri: str = ""):
+        """
+        Initiate Google OAuth login flow
+        Redirects to Google authorization page
+        """
+        if not is_oauth_configured():
+            return JSONResponse(
+                status_code=500,
+                content={"error": "Google OAuth is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables."}
+            )
+
+        return await initiate_login(request, redirect_uri=redirect_uri)
+
+
+    @app.get("/auth/callback")
+    async def auth_callback(request: Request):
+        """
+        Handle Google OAuth callback
+        Returns JSON with access token and user info
+        """
+        return await handle_callback(request)
+
+
+    @app.get("/auth/config")
+    async def auth_config(request: Request):
+        """
+        Check if OAuth is configured and get login URL
+        Returns configuration status and login URL for frontend
+        """
+        if not is_oauth_configured():
+            return JSONResponse(content={
+                "configured": False,
+                "login_url": None,
+                "message": "Google OAuth is not configured. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET environment variables."
+            })
+
+        # Generate login URL
+        login_url = get_oauth_login_url(request)
+
+        return JSONResponse(content={
+            "configured": True,
+            "login_url": login_url,
+            "message": "Google OAuth is configured"
+        })
+
+
+    @app.on_event("startup")
+    async def startup_cleanup_tasks():
+        """Start periodic cleanup of expired OAuth states and sessions"""
+        if not _oauth_available:
+            return
+
+        async def cleanup_task():
+            """Periodic cleanup task"""
+            import asyncio
+            while True:
+                try:
+                    cleanup_expired_states()
+                    cleanup_expired_sessions()
+                    await asyncio.sleep(300)  # Run every 5 minutes
+                except Exception as e:
+                    logger.error(f"Error in cleanup task: {e}")
+                    await asyncio.sleep(60)  # Retry after 1 minute on error
+
+        # Start cleanup task in background
+        import asyncio
+        asyncio.create_task(cleanup_task())
 
 
 @app.websocket("/session")
@@ -247,22 +346,69 @@ async def handle_media_stream(websocket: WebSocket):
     logger.info(json.dumps({"event": "ws.connect", "session_id": session_id,
                             "auth_headers": auth_relevant, "ts": time.time()}))
 
-    # Extract user identity from OAuth proxy headers
+    # Extract user identity from OAuth proxy headers or JWT token
     forwarded_user = headers.get('x-forwarded-user', '')
     forwarded_email = headers.get('x-forwarded-email', '')
     forwarded_name = headers.get('x-forwarded-name', '')
 
+    # Also check for JWT token in Authorization header or query parameter
+    # Browser WebSockets can't send custom headers, so we fall back to query params
+    auth_header = headers.get('authorization', '')
+    jwt_user_info = None
+    jwt_token = None
+
+    # Try Authorization header first (for reverse proxy auth)
+    if auth_header and auth_header.startswith('Bearer '):
+        jwt_token = auth_header[7:]  # Remove 'Bearer ' prefix
+
+    # Fallback: check query parameter for browser WebSocket connections
+    if not jwt_token:
+        try:
+            from urllib.parse import urlparse, parse_qs
+            ws_url = str(websocket.url)
+            if 'token=' in ws_url:
+                query_params = parse_qs(urlparse(ws_url).query)
+                jwt_token = query_params.get('token', [None])[0]
+        except Exception as e:
+            logger.warning(f"Failed to parse token from query params: {e}")
+
+    # Validate JWT token if present
+    if jwt_token:
+        try:
+            jwt_user_info = get_user_info_from_token(jwt_token) if _oauth_available else None
+            if jwt_user_info:
+                logger.info(json.dumps({"event": "ws.jwt_auth", "session_id": session_id,
+                                       "user_email": jwt_user_info.get("email"),
+                                       "user_name": jwt_user_info.get("name"),
+                                       "ts": time.time()}))
+        except Exception as e:
+            logger.warning(f"Failed to extract user info from JWT: {e}")
+
     # If standard headers are missing, note which auth headers ARE present for debugging
-    if not forwarded_user and not forwarded_email:
-        present = [k for k in header_dict if k.lower().startswith('x-forward') or 'cookie' in k.lower()]
+    if not forwarded_user and not forwarded_email and not jwt_user_info:
+        present = [k for k in header_dict if k.lower().startswith('x-forward') or 'cookie' in k.lower() or 'authorization' in k.lower()]
         logger.info(json.dumps({"event": "ws.auth_missing", "session_id": session_id,
                                 "present_auth_headers": present, "ts": time.time()}))
+
+    # Determine user identity - JWT token takes priority, then proxy headers
+    user_identity = None
+    user_display_name = None
+
+    if jwt_user_info and jwt_user_info.get("email"):
+        user_identity = jwt_user_info["email"]
+        user_display_name = jwt_user_info.get("name", jwt_user_info["email"])
+    elif forwarded_email:
+        user_identity = forwarded_email
+        user_display_name = forwarded_name or forwarded_email
+    elif forwarded_user:
+        user_identity = forwarded_user
+        user_display_name = forwarded_user
+
     logger.info(json.dumps({"event": "ws.user_identity", "session_id": session_id,
-                            "user": forwarded_user, "email": forwarded_email,
-                            "name": forwarded_name, "ts": time.time()}))
+                            "user_identity": user_identity, "user_display": user_display_name,
+                            "ts": time.time()}))
 
     # Load per-user memory (keyed by email if available, else user id)
-    user_identity = forwarded_email or forwarded_user
     memory_store: UserMemoryStore | None = None
     if user_identity:
         memory_store = UserMemoryStore(user_identity)

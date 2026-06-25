@@ -7,6 +7,18 @@ let streamingResponse = null; // Track current streaming response { index, conte
 let currentTurnUserTranscript = ''; // Last user utterance for memory extraction
 let currentTurnAssistantTranscript = ''; // Current assistant response for memory extraction
 
+// OAuth state
+let oauthToken = null; // JWT access token
+let userInfo = null; // User information from OAuth
+
+// Storage keys
+const STORAGE_KEYS = {
+  TOKEN: 'ducke_oauth_token',
+  USER_INFO: 'ducke_user_info',
+  Muted: 'duck-e-muted',
+  PTT: 'duck-e-ptt'
+};
+
 // Cost tracking state (gpt-realtime-2 + backend APIs)
 let sessionCost = {
   startTime: null,
@@ -203,24 +215,125 @@ if (typeof marked !== 'undefined') {
 
 // Load mute state from localStorage
 const loadMuteState = () => {
-  const saved = localStorage.getItem('duck-e-muted');
+  const saved = localStorage.getItem(STORAGE_KEYS.Muted);
   return saved === 'true';
 };
 
 // Save mute state to localStorage
 const saveMuteState = (muted) => {
-  localStorage.setItem('duck-e-muted', muted.toString());
+  localStorage.setItem(STORAGE_KEYS.Muted, muted.toString());
 };
 
 // Load push-to-talk state from localStorage
 const loadPushToTalkState = () => {
-  const saved = localStorage.getItem('duck-e-ptt');
+  const saved = localStorage.getItem(STORAGE_KEYS.PTT);
   return saved === 'true';
 };
 
 // Save push-to-talk state to localStorage
 const savePushToTalkState = (enabled) => {
-  localStorage.setItem('duck-e-ptt', enabled.toString());
+  localStorage.setItem(STORAGE_KEYS.PTT, enabled.toString());
+};
+
+// OAuth Functions
+
+// Load OAuth state from localStorage
+const loadOAuthState = () => {
+  try {
+    const token = localStorage.getItem(STORAGE_KEYS.TOKEN);
+    const userInfoStr = localStorage.getItem(STORAGE_KEYS.USER_INFO);
+    if (token && userInfoStr) {
+      oauthToken = token;
+      userInfo = JSON.parse(userInfoStr);
+      return true;
+    }
+  } catch (e) {
+    console.error('Failed to load OAuth state:', e);
+  }
+  return false;
+};
+
+// Save OAuth state to localStorage
+const saveOAuthState = (token, user) => {
+  localStorage.setItem(STORAGE_KEYS.TOKEN, token);
+  localStorage.setItem(STORAGE_KEYS.USER_INFO, JSON.stringify(user));
+  oauthToken = token;
+  userInfo = user;
+};
+
+// Clear OAuth state from localStorage
+const clearOAuthState = () => {
+  localStorage.removeItem(STORAGE_KEYS.TOKEN);
+  localStorage.removeItem(STORAGE_KEYS.USER_INFO);
+  oauthToken = null;
+  userInfo = null;
+};
+
+// Update login UI based on OAuth state
+const updateLoginUI = () => {
+  const loginBtn = document.getElementById('login-btn');
+  const userInfoDiv = document.getElementById('user-info');
+  const userAvatar = document.getElementById('user-avatar');
+  const userName = document.getElementById('user-name');
+  const userEmail = document.getElementById('user-email');
+
+  if (userInfo && oauthToken) {
+    // User is logged in
+    if (loginBtn) loginBtn.style.display = 'none';
+    if (userInfoDiv) userInfoDiv.style.display = 'flex';
+
+    // Update user info
+    if (userName) userName.textContent = userInfo.name || 'User';
+    if (userEmail) userEmail.textContent = userInfo.email || '';
+
+    // Set avatar (first letter of name)
+    if (userAvatar) {
+      const firstLetter = (userInfo.name || 'U').charAt(0).toUpperCase();
+      userAvatar.textContent = firstLetter;
+    }
+  } else {
+    // User is not logged in
+    if (loginBtn && typeof OAUTH_CONFIGURED !== 'undefined' && OAUTH_CONFIGURED) {
+      loginBtn.style.display = 'inline-flex';
+    }
+    if (userInfoDiv) userInfoDiv.style.display = 'none';
+  }
+};
+
+// Handle OAuth login
+const handleLogin = () => {
+  // Redirect to Google OAuth
+  const redirectUri = `${window.location.protocol}//${window.location.host}/auth/callback`;
+  window.location.href = `/auth/login?redirect_uri=${encodeURIComponent(redirectUri)}`;
+};
+
+// Handle OAuth logout
+const handleLogout = () => {
+  clearOAuthState();
+  updateLoginUI();
+
+  // Disconnect if connected
+  if (connectionStatus && webRTC) {
+    webRTC.close();
+    updateUI("disconnected");
+    connectionStatus = false;
+    resetCostState();
+  }
+};
+
+// Get WebSocket URL with auth headers
+const getWebSocketUrl = () => {
+  const url = new URL(socketUrl);
+
+  // Add OAuth token if available
+  if (oauthToken) {
+    // We'll pass the token via WebSocket subprotocol or query param
+    // For now, we'll pass it as a query parameter (less secure but functional)
+    // In production, you'd want to pass it via WebSocket subprotocols
+    url.searchParams.set('token', oauthToken);
+  }
+
+  return url.toString();
 };
 
 // Update mute button UI (both main and inline)
@@ -943,7 +1056,9 @@ const toggleConnection = async () => {
     resetCostState();
 
     try {
-      webRTC = new ag2client.WebRTC(socketUrl);
+      // Use WebSocket URL with OAuth token if available
+      const wsUrl = getWebSocketUrl();
+      webRTC = new ag2client.WebRTC(wsUrl);
 
       // Set up the disconnect callback.
       webRTC.onDisconnect = () => {
@@ -1024,6 +1139,62 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   console.log('DOMContentLoaded fired - attaching event listeners');
+
+  // Initialize OAuth state
+  if (typeof OAUTH_CONFIGURED !== 'undefined' && OAUTH_CONFIGURED) {
+    loadOAuthState();
+    updateLoginUI();
+
+    // Add login button event listener
+    const loginBtn = document.getElementById('login-btn');
+    if (loginBtn) {
+      loginBtn.addEventListener('click', handleLogin);
+    }
+
+    // Add logout button event listener
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+      logoutBtn.addEventListener('click', handleLogout);
+    }
+
+    // Check if we're returning from OAuth callback
+    const urlParams = new URLSearchParams(window.location.search);
+    const accessToken = urlParams.get('access_token');
+    if (accessToken) {
+      // We have a token from OAuth callback
+      console.log('OAuth callback detected, saving token...');
+
+      // Extract user info from URL params (if available)
+      const userParam = urlParams.get('user_info');
+      let user = null;
+      if (userParam) {
+        try {
+          user = JSON.parse(decodeURIComponent(userParam));
+        } catch (e) {
+          console.error('Failed to parse user info from URL:', e);
+        }
+      }
+
+      // Fetch user info from backend if not in URL
+      if (!user) {
+        fetch('/auth/config')
+          .then(response => response.json())
+          .then(data => {
+            if (data.configured) {
+              // Token is valid, we'll get user info on next connection
+              saveOAuthState(accessToken, { email: 'Authenticated User', name: 'User' });
+              updateLoginUI();
+            }
+          })
+          .catch(err => console.error('Failed to verify token:', err));
+      } else {
+        saveOAuthState(accessToken, user);
+      }
+
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }
 
   // Main controls
   const toggleButton = document.getElementById("toggle-connection");
