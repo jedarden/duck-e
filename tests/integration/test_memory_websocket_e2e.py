@@ -90,7 +90,7 @@ class TestMemoryWebSocketE2E:
 
         This test simulates:
         1. Connect session 1 with user headers
-        2. Receive ag2.init message
+        2. Receive ducke.init message
         3. Simulate save_memory tool call
         4. Disconnect
         5. Connect session 2 with same user headers
