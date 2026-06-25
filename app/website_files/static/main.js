@@ -557,6 +557,19 @@ const updateMessageByItemId = (itemId, content, options = {}) => {
   return -1;
 };
 
+// Format tool name for display
+const formatToolName = (name) => {
+  const displayNames = {
+    get_current_weather: 'Weather',
+    web_search: 'Web Search',
+    web_fetch: 'Fetch URL',
+    voice_change: 'Voice Change',
+    save_memory: 'Save Memory',
+    recall_memories: 'Recall Memories'
+  };
+  return displayNames[name] || name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+};
+
 // Add a tool call message to the transcript
 const addToolCallMessage = (name, args, callId) => {
   transcriptMessages.push({
@@ -567,7 +580,8 @@ const addToolCallMessage = (name, args, callId) => {
     callId: callId,
     status: 'pending',
     result: null,
-    timestamp: Date.now()
+    timestamp: Date.now(),
+    justAdded: true // Flag for initial animation
   });
   renderTranscript();
   showTranscript();
@@ -679,6 +693,20 @@ const renderTranscript = (isStreamingUpdate = false) => {
 
       const statusClass = msg.status === 'completed' ? 'completed' : 'pending';
 
+      // Tool-specific icons
+      const toolIcons = {
+        get_current_weather: '🌤️',
+        web_search: '🔍',
+        web_fetch: '📄',
+        voice_change: '🎙️',
+        save_memory: '💾',
+        recall_memories: '🧠'
+      };
+      const toolIcon = toolIcons[msg.toolName] || '🔧';
+
+      // Format timestamp
+      const time = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
       // Response section inside the expandable body
       let resultHtml = '';
       if (msg.result) {
@@ -694,12 +722,16 @@ const renderTranscript = (isStreamingUpdate = false) => {
           </div>`;
       }
 
+      const justAdded = msg.justAdded ? 'data-just-added="true"' : '';
+      const justCompleted = msg.justCompleted ? 'data-just-completed="true"' : '';
+
       return `
-        <div class="transcript-message tool-call" data-idx="${idx}">
-          <details class="tool-call-details">
+        <div class="transcript-message tool-call" data-idx="${idx}" ${justAdded} ${justCompleted}>
+          <details class="tool-call-details" ${msg.justAdded ? 'open' : ''}>
             <summary class="tool-call-summary">
-              <span class="tool-call-icon">🔧</span>
-              <span class="tool-call-name">${msg.toolName}</span>
+              <span class="tool-call-icon ${msg.toolName}">${toolIcon}</span>
+              <span class="tool-call-name">${formatToolName(msg.toolName)}</span>
+              <span class="tool-call-timestamp">${time}</span>
               <span class="tool-call-status ${statusClass}">${msg.status}</span>
             </summary>
             <div class="tool-call-body">
@@ -714,8 +746,8 @@ const renderTranscript = (isStreamingUpdate = false) => {
       `;
     }
 
-    const roleClass = msg.role === 'user' ? 'user' : 'assistant';
-    const roleLabel = msg.role === 'user' ? 'You' : 'DUCK-E';
+    const roleClass = msg.role === 'user' ? 'user' : msg.role === 'system' ? 'system' : 'assistant';
+    const roleLabel = msg.role === 'user' ? 'You' : msg.role === 'system' ? 'System' : 'DUCK-E';
     const streamingClass = msg.streaming ? ' streaming' : '';
 
     // Parse markdown if marked is available (skip for empty streaming)
@@ -902,7 +934,15 @@ const handleWebRTCMessage = (event) => {
       );
       if (idx !== -1) {
         transcriptMessages[idx].result = output;
+        transcriptMessages[idx].status = 'completed';
+        transcriptMessages[idx].justCompleted = true; // Trigger completion animation
         renderTranscript();
+        // Clear the justCompleted flag after animation
+        setTimeout(() => {
+          if (transcriptMessages[idx]) {
+            transcriptMessages[idx].justCompleted = false;
+          }
+        }, 500);
       }
     }
     // Output item done - mark matching tool call as completed
@@ -914,7 +954,13 @@ const handleWebRTCMessage = (event) => {
         );
         if (idx !== -1) {
           transcriptMessages[idx].status = 'completed';
+          transcriptMessages[idx].justCompleted = true; // Flag for completion animation
           renderTranscript();
+          // Remove animation flag after a delay
+          setTimeout(() => {
+            const msg = transcriptMessages[idx];
+            if (msg) msg.justCompleted = false;
+          }, 1000);
         }
       }
     }

@@ -1,0 +1,5 @@
+Task complete:
+
+1. Added `beautifulsoup4` to requirements.txt
+2. Committed: `deps: add beautifulsoup4 for HTML text extraction`
+3. Closed bead duck-e-w921.4 with retrospective
