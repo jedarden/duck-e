@@ -785,7 +785,7 @@ const renderTranscript = (isStreamingUpdate = false) => {
 // Handle incoming messages from WebRTC for transcript
 const handleWebRTCMessage = (event) => {
   try {
-    // event now has { data: string, message: object } from our modified ag2client
+    // event now has { data: string, message: object } from our modified ducke client
     const data = event.message || (typeof event.data === 'string' ? JSON.parse(event.data) : event.data);
 
     // Perf telemetry hooks
@@ -1104,7 +1104,7 @@ const toggleConnection = async () => {
     try {
       // Use WebSocket URL with OAuth token if available
       const wsUrl = getWebSocketUrl();
-      webRTC = new ag2client.WebRTC(wsUrl);
+      webRTC = new ducke.WebRTC(wsUrl);
 
       // Set up the disconnect callback.
       webRTC.onDisconnect = () => {
