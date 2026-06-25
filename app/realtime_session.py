@@ -27,7 +27,7 @@ class RealtimeSession:
 
     Replaces AG2's RealtimeAgent. Responsibilities:
     - Obtain an ephemeral key from OpenAI /v1/realtime/sessions (server-side)
-    - Send ag2.init to the browser client to bootstrap WebRTC
+    - Send ducke.init to the browser client to bootstrap WebRTC
     - Relay tool calls from client -> execute -> return results
     - Support voice change via ducke.reinit (new ephemeral key, new WebRTC peer)
     """
@@ -135,7 +135,7 @@ class RealtimeSession:
             # Send a session.update event to change the voice.
             # The function_call_output from _handle_tool_call (containing
             # "Voice changed to X") will be spoken in the new voice, and
-            # ag2client.js will send response.create to trigger continuation.
+            # ducke.js will send response.create to trigger continuation.
             await self.websocket.send_json({
                 "type": "ducke.session_update",
                 "update": {
@@ -169,10 +169,10 @@ class RealtimeSession:
             await self.websocket.close(code=1011, reason="Session initialization failed")
             return
 
-        # Send ag2.init — compatible with existing ag2client.js
+        # Send ducke.init
         # SECURITY: session_data contains only ephemeral key + model.
         await self.websocket.send_json({
-            "type": "ag2.init",
+            "type": "ducke.init",
             "config": session_data,
             "init": [],
         })
@@ -270,7 +270,7 @@ class RealtimeSession:
                 "output": result_str,
             },
         })
-        # NOTE: response.create is sent by the browser client (ag2client.js)
+        # NOTE: response.create is sent by the browser client (ducke.js)
         # immediately after it forwards the function_call_output to the
         # OpenAI data channel.  Sending it from the backend was unreliable
         # because the relay adds latency and the message could be dropped.
