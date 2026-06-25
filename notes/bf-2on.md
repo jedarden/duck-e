@@ -1,33 +1,24 @@
-# Task bf-2on: Completed Successfully
+# Bead bf-2on: ag2client → ducke Rebranding
 
-## Summary
-The ag2client → ducke rebranding is now fully complete. This task updates all frontend code to use the new ducke.js file and ducke.init message type.
+## Status: Already Completed
 
-## Completed Changes
+This bead requested renaming `ag2client.js` to `ducke.js` and updating the `ag2.init` message type to `ducke.init`.
 
-### 1. File Deleted
-- `app/website_files/static/ag2client.js` → REMOVED (replaced by ducke.js)
+### Current State (Verified 2025-06-25)
 
-### 2. Frontend References Updated
-- **main.js**:
-  - Line 788: Updated comment from "ag2client" → "ducke client"
-  - Line 1107: Changed `new ag2client.WebRTC(wsUrl)` → `new ducke.WebRTC(wsUrl)`
+All requested changes have already been completed in prior commits:
 
-- **chat.html**:
-  - Line 1566: Changed script source from `/static/ag2client.js` → `/static/ducke.js`
+1. ✅ **File renamed**: `app/website_files/static/ag2client.js` → `app/website_files/static/ducke.js`
+2. ✅ **Class name updated**: Namespace changed from `ag2client` to `ducke`
+3. ✅ **Message type updated**:
+   - Backend (`app/realtime_session.py:175`): `"type": "ducke.init"`
+   - Frontend (`app/website_files/static/ducke.js:383`): `if (type === "ducke.init")`
+4. ✅ **Template updated**: `app/website_files/templates/chat.html:1566` references `/static/ducke.js`
+5. ✅ **Main script updated**: `app/website_files/static/main.js:1107` uses `new ducke.WebRTC(wsUrl)`
 
-### 3. Backend (Already Complete)
-- **realtime_session.py**: Uses `"type": "ducke.init"` (completed in commit 8f7a8f0)
+### Git History
 
-### 4. Client Library
-- **ducke.js**: Exports `ducke.WebRTC` class (added in commit 8f7a8f0)
+- `a9cce85` - "refactor: complete ag2client → ducke rebranding (bf-2on)"
+- `8f7a8f0` - "refactor: complete ag2client → ducke rebranding"
 
-## Verification
-All `ag2.init`, `ag2client`, and `ag2.WebRTC` references have been removed from active code:
-- ✅ No references in frontend JavaScript
-- ✅ No references in HTML templates
-- ✅ Backend uses ducke.init message type
-- ✅ Client library exports ducke namespace
-
-## Bead Closure
-This completes Plan Change 1's renaming requirements. The task is done.
+No remaining references to `ag2client` or `ag2.init` found in the codebase.
