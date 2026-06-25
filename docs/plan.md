@@ -73,7 +73,7 @@ Replace `RealtimeAgent` with a custom `RealtimeSession` class (~150 lines) that:
 | `app/config.py` | Simplify — remove tag-based filtering, just provide `{model, api_key}` dicts directly |
 | `app/main.py` | Replace `RealtimeAgent` import and usage with new `RealtimeSession` class |
 | `app/realtime_session.py` | **NEW** — Custom `RealtimeSession` implementation |
-| `app/website_files/static/ag2client.js` | Rename references from `ag2` to `ducke`, update `ag2.init` → `ducke.init` message type (or keep compatible) |
+| `app/website_files/static/ducke.js` | ~~Rename references from `ag2` to `ducke`, update `ag2.init` → `ducke.init` message type (or keep compatible)~~ **COMPLETED** — File renamed to `ducke.js`, message type updated to `ducke.init` |
 
 ### Implementation Details for `RealtimeSession`
 
