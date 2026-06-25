@@ -192,7 +192,7 @@ async def index_page(request: Request):
 async def health_openai():
     """Test OpenAI realtime session creation. No auth — VPN entrypoint only."""
     api_key = os.getenv("OPENAI_API_KEY", "")
-    model = os.getenv("REALTIME_MODEL", "gpt-4o-realtime-preview")
+    model = os.getenv("REALTIME_MODEL", "gpt-realtime-2")
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
