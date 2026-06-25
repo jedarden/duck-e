@@ -117,16 +117,16 @@
             font-size: 0.9rem;
             font-weight: 500;
             border: 1px solid var(--border);
-            border-radius: 10px;
-            background: var(--bg-tertiary);
+            border-radius: 12px;
+            background: var(--bg-secondary);
             color: var(--text-primary);
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
         }
 
         .login-btn:hover {
-            background: var(--bg-primary);
-            border-color: var(--primary);
+            background: var(--bg-tertiary);
+            border-color: var(--primary-light);
         }
 
         .login-btn .google-icon {
@@ -174,19 +174,20 @@
         }
 
         .logout-btn {
-            padding: 6px 10px;
+            padding: 6px 12px;
             font-size: 0.8rem;
             border: 1px solid var(--border);
-            border-radius: 6px;
-            background: transparent;
+            border-radius: 8px;
+            background: var(--bg-secondary);
             color: var(--text-muted);
             cursor: pointer;
             transition: all 0.2s ease;
         }
 
         .logout-btn:hover {
-            background: var(--bg-primary);
+            background: var(--bg-tertiary);
             color: var(--text-primary);
+            border-color: var(--primary-light);
         }
 
         @keyframes slideDown {
@@ -345,10 +346,10 @@
             color: var(--text-primary);
         }
 
-        /* Connect button */
+        /* Connect button - using unified .ducke-btn system */
         #toggle-connection {
             position: relative;
-            padding: 16px 48px;
+            padding: 14px 44px;
             font-size: 1.125rem;
             font-weight: 600;
             border: none;
@@ -356,7 +357,7 @@
             background: linear-gradient(135deg, var(--primary), var(--primary-light));
             color: white;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);
             overflow: hidden;
         }
@@ -385,6 +386,12 @@
             transform: translateY(0);
         }
 
+        #toggle-connection:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         #toggle-connection.connected {
             background: linear-gradient(135deg, var(--danger), #DC2626);
             box-shadow: 0 4px 15px rgba(239, 68, 68, 0.4);
@@ -411,16 +418,16 @@
             font-size: 0.95rem;
             font-weight: 500;
             border: 1px solid var(--border);
-            border-radius: 10px;
-            background: var(--bg-tertiary);
+            border-radius: 12px;
+            background: var(--bg-secondary);
             color: var(--text-secondary);
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
         }
 
-        .audio-btn:hover {
-            background: var(--bg-primary);
-            border-color: var(--primary);
+        .audio-btn:hover:not(:disabled) {
+            background: var(--bg-tertiary);
+            border-color: var(--primary-light);
             color: var(--text-primary);
         }
 
@@ -504,12 +511,12 @@
             gap: 10px;
             width: 100%;
             max-width: 300px;
-            padding: 20px 30px;
+            padding: 18px 28px;
             font-size: 1.1rem;
             font-weight: 600;
             border: 2px solid var(--primary);
-            border-radius: 15px;
-            background: var(--bg-tertiary);
+            border-radius: 12px;
+            background: var(--bg-secondary);
             color: var(--text-primary);
             cursor: pointer;
             transition: all 0.2s ease;
@@ -521,7 +528,8 @@
         }
 
         .ptt-btn:hover {
-            background: var(--bg-primary);
+            background: var(--bg-tertiary);
+            border-color: var(--primary-light);
         }
 
         .ptt-btn:active,
@@ -698,7 +706,7 @@
             padding: 6px 12px;
             font-size: 0.8rem;
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 8px;
             background: transparent;
             color: var(--text-muted);
             cursor: pointer;
@@ -708,6 +716,7 @@
         .clear-transcript-btn:hover {
             background: var(--bg-tertiary);
             color: var(--text-primary);
+            border-color: var(--primary-light);
         }
 
         /* Unified button system */
@@ -781,27 +790,46 @@
             color: var(--danger);
         }
 
-        /* Tool call cards in transcript */
+        /* Tool call cards in transcript - Enhanced visibility */
         .transcript-message.tool-call {
             color: var(--text-muted);
+            margin: 16px 0;
+            padding: 0;
+            animation: toolCallAppear 0.3s ease-out;
+        }
+
+        .transcript-message.tool-call:first-child {
+            margin-top: 0;
         }
 
         .tool-call-details {
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: 12px;
             background: var(--bg-tertiary);
             overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .tool-call-details:hover {
+            border-color: var(--primary-light);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
         }
 
         .tool-call-summary {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 8px 12px;
+            padding: 12px 16px;
             cursor: pointer;
             user-select: none;
             list-style: none;
             font-size: 0.85rem;
+            transition: background 0.2s ease;
+        }
+
+        .tool-call-summary:hover {
+            background: var(--bg-primary);
         }
 
         .tool-call-summary::-webkit-details-marker {
@@ -820,38 +848,106 @@
         }
 
         .tool-call-icon {
-            font-size: 0.9rem;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-primary);
+            border-radius: 6px;
+            padding: 2px;
         }
 
         .tool-call-name {
             font-weight: 600;
             color: var(--text-secondary);
             flex: 1;
+            font-size: 0.9rem;
+        }
+
+        .tool-call-timestamp {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-right: 8px;
         }
 
         .tool-call-status {
-            font-size: 0.75rem;
-            padding: 2px 8px;
+            font-size: 0.7rem;
+            padding: 4px 10px;
             border-radius: 12px;
-            font-weight: 500;
+            font-weight: 600;
+            flex-shrink: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .tool-call-status.pending {
             background: rgba(245, 158, 11, 0.15);
             color: var(--warning);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            animation: statusPulse 2s ease-in-out infinite;
         }
 
         .tool-call-status.completed {
             background: rgba(16, 185, 129, 0.15);
             color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.3);
         }
+
+        @keyframes statusPulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        /* Tool call animations */
+        @keyframes toolCallAppear {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes toolCallComplete {
+            0% {
+                border-color: var(--success);
+            }
+            50% {
+                box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+            }
+            100% {
+                border-color: var(--border);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            }
+        }
+
+        .transcript-message.tool-call[data-just-completed="true"] .tool-call-details {
+            animation: toolCallComplete 0.5s ease-out;
+        }
+
+        /* Tool-specific icon styling */
+        .tool-call-icon.get_current_weather { background: linear-gradient(135deg, #0EA5E9, #38BDF8); }
+        .tool-call-icon.web_search { background: linear-gradient(135deg, #8B5CF6, #A78BFA); }
+        .tool-call-icon.web_fetch { background: linear-gradient(135deg, #F59E0B, #FBBF24); }
+        .tool-call-icon.voice_change { background: linear-gradient(135deg, #EC4899, #F472B6); }
+        .tool-call-icon.save_memory { background: linear-gradient(135deg, #10B981, #34D399); }
+        .tool-call-icon.recall_memories { background: linear-gradient(135deg, #6366F1, #818CF8); }
 
         .tool-call-body {
             border-top: 1px solid var(--border);
         }
 
         .tool-call-section {
-            padding: 8px 12px;
+            padding: 10px 14px;
         }
 
         .tool-call-section + .tool-call-section {
@@ -863,23 +959,41 @@
             text-transform: uppercase;
             letter-spacing: 0.05em;
             color: var(--text-muted);
-            margin-bottom: 4px;
+            margin-bottom: 6px;
+            font-weight: 600;
         }
 
         .tool-call-section-text {
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             margin: 0;
             white-space: pre-wrap;
             word-break: break-word;
             color: var(--text-secondary);
             max-height: 200px;
             overflow-y: auto;
+            background: var(--bg-primary);
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
         }
 
         .tool-call-loading {
             color: var(--warning);
             font-style: italic;
-            font-size: 0.8rem;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tool-call-loading::before {
+            content: '';
+            width: 12px;
+            height: 12px;
+            border: 2px solid var(--warning);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
         }
 
         .transcript-content {
@@ -924,6 +1038,20 @@
 
         .transcript-message.assistant {
             color: var(--text-secondary);
+        }
+
+        .transcript-message.system {
+            color: var(--text-muted);
+        }
+
+        .transcript-message.system .transcript-label {
+            color: var(--text-muted);
+        }
+
+        .transcript-message.system .transcript-text {
+            font-style: italic;
+            font-size: 0.9rem;
+            color: var(--text-muted);
         }
 
         .transcript-label {
@@ -1092,6 +1220,43 @@
 
         @keyframes spin {
             to { transform: rotate(360deg); }
+        }
+
+        /* Tool call animations */
+        @keyframes toolCallAppear {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes toolCallComplete {
+            0% {
+                background: var(--bg-tertiary);
+            }
+            50% {
+                background: rgba(16, 185, 129, 0.1);
+            }
+            100% {
+                background: var(--bg-tertiary);
+            }
+        }
+
+        .transcript-message.tool-call[data-just-added="true"] {
+            animation: toolCallAppear 0.3s ease-out;
+        }
+
+        .transcript-message.tool-call[data-just-completed="true"] {
+            animation: toolCallComplete 0.5s ease-out;
+        }
+
+        /* Pulsing animation for pending tool calls */
+        .tool-call-status.pending {
+            animation: pulse 2s ease-in-out infinite;
         }
 
         /* Mobile optimizations */
@@ -1377,18 +1542,19 @@
             padding: 4px 8px;
             border: 1px solid var(--border);
             border-radius: 8px;
-            background: var(--bg-tertiary);
+            background: var(--bg-secondary);
             color: var(--text-muted);
             font-size: 0.78rem;
             font-weight: 500;
             white-space: nowrap;
             cursor: pointer;
-            transition: background 0.2s ease;
+            transition: all 0.2s ease;
         }
 
         .cost-toggle-btn:hover {
-            background: var(--bg-primary);
+            background: var(--bg-tertiary);
             color: var(--text-secondary);
+            border-color: var(--primary-light);
         }
 
         /* Cost panel: pops up above the inline-controls bar */
@@ -1528,7 +1694,7 @@
             </div>
             <div class="login-container">
                 <!-- Login button (shown when OAuth configured and user not logged in) -->
-                <button id="login-btn" class="login-btn" style="display: none;">
+                <button id="login-btn" class="login-btn ducke-btn ducke-btn--sm" style="display: none;">
                     <svg class="google-icon" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                         <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                         <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -1545,7 +1711,7 @@
                         <div class="user-name" id="user-name">User Name</div>
                         <div class="user-email" id="user-email">user@example.com</div>
                     </div>
-                    <button id="logout-btn" class="logout-btn">Logout</button>
+                    <button id="logout-btn" class="logout-btn ducke-btn ducke-btn--sm">Logout</button>
                 </div>
             </div>
         </header>
