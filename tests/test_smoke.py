@@ -39,7 +39,7 @@ SSL_CTX.verify_mode = ssl.CERT_NONE
 
 async def _open_session(extra_headers=None):
     """
-    Connect to the backend WebSocket and return (ws, ag2_init_message).
+    Connect to the backend WebSocket and return (ws, ducke_init_message).
     Does NOT establish a WebRTC peer — just confirms session init works.
     The Origin header must match ALLOWED_ORIGINS set on the deployed pod.
     """
@@ -116,19 +116,19 @@ class TestHTTPEndpoints:
 class TestSession:
 
     @pytest.mark.asyncio
-    async def test_websocket_returns_ag2_init(self):
+    async def test_websocket_returns_ducke_init(self):
         """
-        Backend WebSocket must respond with ag2.init containing an ephemeral key.
+        Backend WebSocket must respond with ducke.init containing an ephemeral key.
         This is the gating test — if it fails, all tool tests will also fail.
         """
         ws, msg = await _open_session()
         await ws.close()
 
-        assert msg["type"] == "ag2.init", f"Expected ag2.init, got: {msg}"
+        assert msg["type"] == "ducke.init", f"Expected ducke.init, got: {msg}"
         cfg = msg.get("config", {})
-        assert "client_secret" in cfg, "ag2.init missing client_secret"
+        assert "client_secret" in cfg, "ducke.init missing client_secret"
         assert cfg["client_secret"].get("value"), "Ephemeral key is empty"
-        assert cfg.get("model"), "ag2.init missing model"
+        assert cfg.get("model"), "ducke.init missing model"
 
 
 # ---------------------------------------------------------------------------
@@ -142,7 +142,7 @@ class TestTools:
     async def test_get_current_weather(self):
         """Weather tool returns current temperature for a known city."""
         ws, msg = await _open_session()
-        assert msg["type"] == "ag2.init"
+        assert msg["type"] == "ducke.init"
         try:
             result_msg = await _call_tool(ws, "get_current_weather", {"location": "New York"})
         finally:
@@ -158,7 +158,7 @@ class TestTools:
     async def test_get_weather_forecast(self):
         """Forecast tool returns daily forecast data."""
         ws, msg = await _open_session()
-        assert msg["type"] == "ag2.init"
+        assert msg["type"] == "ducke.init"
         try:
             result_msg = await _call_tool(ws, "get_weather_forecast", {"location": "London"})
         finally:
@@ -173,7 +173,7 @@ class TestTools:
     async def test_web_search(self):
         """Web search tool returns non-empty results for a simple query."""
         ws, msg = await _open_session()
-        assert msg["type"] == "ag2.init"
+        assert msg["type"] == "ducke.init"
         try:
             result_msg = await _call_tool(ws, "web_search", {"query": "OpenAI Realtime API"})
         finally:
@@ -187,7 +187,7 @@ class TestTools:
     async def test_web_fetch(self):
         """Web fetch tool retrieves content from a public URL."""
         ws, msg = await _open_session()
-        assert msg["type"] == "ag2.init"
+        assert msg["type"] == "ducke.init"
         try:
             result_msg = await _call_tool(ws, "web_fetch", {"url": "https://httpbin.org/get"})
         finally:
@@ -203,7 +203,7 @@ class TestTools:
     async def test_save_and_recall_memory(self):
         """Memory tools can save a fact and retrieve it."""
         ws, msg = await _open_session()
-        assert msg["type"] == "ag2.init"
+        assert msg["type"] == "ducke.init"
         try:
             fact = f"smoke test fact {uuid.uuid4().hex[:6]}"
             save_msg = await _call_tool(ws, "save_memory", {"fact": fact})
@@ -222,7 +222,7 @@ class TestTools:
     async def test_change_voice(self):
         """Voice change tool accepts a valid voice name without error."""
         ws, msg = await _open_session()
-        assert msg["type"] == "ag2.init"
+        assert msg["type"] == "ducke.init"
         try:
             result_msg = await _call_tool(ws, "change_voice", {"voice": "nova"})
         finally:
@@ -238,7 +238,7 @@ class TestTools:
     async def test_change_voice_invalid_rejects(self):
         """Voice change tool rejects an invalid voice name."""
         ws, msg = await _open_session()
-        assert msg["type"] == "ag2.init"
+        assert msg["type"] == "ducke.init"
         try:
             result_msg = await _call_tool(ws, "change_voice", {"voice": "not_a_real_voice"})
         finally:

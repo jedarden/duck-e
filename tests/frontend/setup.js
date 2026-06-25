@@ -87,8 +87,8 @@ beforeEach(() => {
   document.body.innerHTML = '';
 });
 
-// Mock ag2client (the WebRTC library DUCK-E uses)
-global.ag2client = {
+// Mock ducke (the WebRTC library DUCK-E uses)
+global.ducke = {
   WebRTC: vi.fn().mockImplementation((socketUrl) => ({
     socketUrl,
     connect: vi.fn().mockResolvedValue(undefined),
