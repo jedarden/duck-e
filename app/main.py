@@ -293,6 +293,38 @@ if _oauth_available:
         })
 
 
+    @app.get("/auth/me")
+    async def auth_me(request: Request):
+        """
+        Validate JWT token and return user information
+        Returns user info from valid JWT token or 401 if invalid
+        """
+        # Extract Authorization header
+        auth_header = request.headers.get('authorization', '')
+
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return JSONResponse(
+                status_code=401,
+                content={"error": "No authorization token provided"}
+            )
+
+        token = auth_header[7:]  # Remove 'Bearer ' prefix
+
+        # Validate token and extract user info
+        user_info = get_user_info_from_token(token)
+
+        if not user_info:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Invalid or expired token"}
+            )
+
+        return JSONResponse(content={
+            "authenticated": True,
+            "user_info": user_info
+        })
+
+
     @app.on_event("startup")
     async def startup_cleanup_tasks():
         """Start periodic cleanup of expired OAuth states and sessions"""

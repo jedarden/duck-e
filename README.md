@@ -32,7 +32,11 @@ Browser (WebRTC) → WebSocket → FastAPI → OpenAI Realtime API
 | `change_voice` | Switches voice mid-session |
 
 ### Persistent memory
-When deployed behind a reverse proxy that injects `x-forwarded-user` / `x-forwarded-email` headers (e.g. oauth2-proxy), DUCK-E stores per-user facts with categories, confidence scores, and time decay, and surfaces them at the start of each session. Memory is silently disabled in local dev when headers are absent.
+DUCK-E stores per-user facts with categories, confidence scores, and time decay, and surfaces them at the start of each session. Memory is keyed by user identity via:
+- **Google OAuth** (recommended): Users sign in with Google, memory is keyed to their email
+- **Reverse proxy headers**: Falls back to `x-forwarded-user` / `x-forwarded-email` headers if OAuth is not configured
+
+Memory is silently disabled in local dev when neither authentication method is available.
 
 ### Cost protection
 - Per-session spend cap (default: $5)
@@ -90,6 +94,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 |----------|----------|---------|-------------|
 | `OPENAI_API_KEY` | Yes | — | Must have Realtime API access |
 | `REALTIME_MODEL` | No | `gpt-4o-realtime-preview` | Override the realtime model |
+| `GOOGLE_CLIENT_ID` | No | — | Google OAuth client ID (for user authentication) |
+| `GOOGLE_CLIENT_SECRET` | No | — | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URI` | No | `http://localhost:8000/auth/callback` | OAuth callback URL |
+| `JWT_SECRET_KEY` | No | `your-secret-key-here-change-in-production` | JWT signing secret |
+| `JWT_ALGORITHM` | No | `HS256` | JWT algorithm |
+| `JWT_EXPIRATION_MINUTES` | No | `120` | JWT token expiration time |
 | `RATE_LIMIT_ENABLED` | No | `true` | Toggle per-IP rate limiting |
 | `RATE_LIMIT_WEBSOCKET` | No | `5/minute` | Per-IP WebSocket connection rate |
 | `COST_PROTECTION_ENABLED` | No | `true` | Toggle cost protection |
@@ -109,6 +119,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `GET` | `/status` | Health check + version |
 | `GET` | `/health/openai` | Tests ephemeral key creation |
 | `GET` | `/metrics` | Prometheus metrics |
+| `GET` | `/auth/login` | Initiate Google OAuth flow |
+| `GET` | `/auth/callback` | OAuth callback handler |
+| `GET` | `/auth/config` | Check OAuth configuration |
+| `GET` | `/auth/me` | Validate JWT and get user info |
 
 ## Voices
 

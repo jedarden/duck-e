@@ -1177,18 +1177,34 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Fetch user info from backend if not in URL
       if (!user) {
-        fetch('/auth/config')
-          .then(response => response.json())
+        fetch('/auth/me', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`
+          }
+        })
+          .then(response => {
+            if (response.ok) {
+              return response.json();
+            } else {
+              throw new Error('Token validation failed');
+            }
+          })
           .then(data => {
-            if (data.configured) {
-              // Token is valid, we'll get user info on next connection
-              saveOAuthState(accessToken, { email: 'Authenticated User', name: 'User' });
+            if (data.authenticated && data.user_info) {
+              saveOAuthState(accessToken, {
+                email: data.user_info.email || 'Authenticated User',
+                name: data.user_info.name || 'User',
+                picture: data.user_info.picture || ''
+              });
               updateLoginUI();
+            } else {
+              console.error('Token validation returned unexpected data:', data);
             }
           })
           .catch(err => console.error('Failed to verify token:', err));
       } else {
         saveOAuthState(accessToken, user);
+        updateLoginUI();
       }
 
       // Clean up URL
