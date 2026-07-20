@@ -2,3 +2,10 @@
 issue_prefix: duck-e
 default_priority: 2
 default_type: task
+
+secret_protection:
+  allowlist:
+    # Repo-relative k8s manifest/workflow paths false-positive against the
+    # Azure Key pattern (long alnum path segments). See CLAUDE.md gotcha:
+    # "Secret scanner false-positives on long absolute paths".
+    - "k8s/[A-Za-z0-9_./-]+"
