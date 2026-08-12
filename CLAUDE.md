@@ -118,15 +118,16 @@ pytest tests/security/
 
 ## Deployment
 
-- **CI/CD**: ArgoCD WorkflowTemplate `duck-e-build` in iad-ci cluster → Docker image → `ghcr.io/jedarden/duck-e`
-- **Production cluster**: apexalgo-iad (accessed via kubectl-proxy over Tailscale)
-- **Auth**: Behind oauth2-proxy or Tailscale auth for header injection
+- **CI/CD**: Argo Workflows `duck-e-build` in `iad-ci` cluster → Docker image → `ronaldraygun/duck-e`, then auto-bumps the tag in every declarative-config manifest referencing it
+- **Production cluster**: **ardenone-cluster** (`k8s/ardenone-cluster/ducke/` in `jedarden/declarative-config`), served at `ducke.ardenone.com` via a Cloudflare Tunnel IngressRoute. There is no apexalgo-iad or ghcr.io deployment — verified 2026-08-13 (no `duck` namespace, no matching pod/deployment on apexalgo-iad).
+- **Auth**: Traefik forward-auth (`ardenone-com-traefik-auth` middleware, Google OAuth) in front of all routes **except** `/session` — the WebSocket route is deliberately excluded because WebSocket upgrades don't work well with the auth middleware. This means `x-forwarded-user`/`x-forwarded-email` are never set on `/session` in production, so `user_identity` stays unset and the memory store is never even created unless a JWT is supplied via the query-param fallback. See Memory System gotcha below.
+- **Storage**: `/data/memory` is an NFS-backed PVC (`ducke-memory`, `nfs-synology-apps` StorageClass) — confirmed empty as of 2026-08-12, consistent with the auth gap above.
 - **Metrics**: Prometheus metrics at `/metrics`
 
 ## Common Gotchas
 
 1. **Ephemeral key flow**: Never send real `OPENAI_API_KEY` to client. Only send `client_secret.value` from `/v1/realtime/sessions` response.
 2. **Voice change**: Requires session reinit — `change_voice` tool sends new config, client reconnects WebRTC.
-3. **Memory persistence**: Requires user headers from reverse proxy — won't work in local dev without mocking headers.
+3. **Memory persistence**: Requires user headers from reverse proxy — won't work in local dev without mocking headers. In production this also doesn't work over `/session` even behind the reverse proxy, since that route skips the auth middleware entirely (see Deployment section) — nothing has ever been persisted to `/data/memory` in the live deployment. Fixing this needs either a `/session`-compatible way to inject identity (e.g. a signed cookie set before the WebSocket upgrade) or wiring up the existing JWT-via-query-param fallback on the frontend.
 4. **AG2 references**: Code still uses `ag2.init` message type for client compatibility, but backend is custom `RealtimeSession`.
 5. **Cost display resets**: On reconnect, `resetCostState()` called in `main.js` → `connectAudio()`.
