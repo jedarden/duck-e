@@ -61,7 +61,7 @@ Memory is silently disabled in local dev when neither authentication method is a
 docker run -d \
   -p 8000:8000 \
   -e OPENAI_API_KEY=sk-... \
-  ghcr.io/jedarden/duck-e:latest
+  ronaldraygun/duck-e:latest
 ```
 
 Open `http://localhost:8000` and start talking.
