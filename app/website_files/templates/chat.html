@@ -213,6 +213,7 @@
             flex-direction: column;
             gap: 30px;
             animation: fadeInUp 0.8s ease-out 0.2s both;
+            padding-bottom: 40vh; /* Push footer below the fold */
         }
 
         @keyframes fadeInUp {
@@ -1409,7 +1410,7 @@
         .footer {
             text-align: center;
             padding: 30px 20px 20px;
-            margin-top: auto;
+            /* Removed margin-top: auto to allow padding-bottom to push it below fold */
             color: var(--text-muted);
             font-size: 0.875rem;
         }
