@@ -6,7 +6,7 @@
 
 ```
 Browser (WebRTC) → WebSocket → FastAPI → OpenAI Realtime API
-                                              (gpt-4o-realtime-preview)
+                                              (gpt-realtime-2)
 ```
 
 1. Your browser captures audio via the MediaDevices API and opens a WebRTC peer connection.
@@ -93,7 +93,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `OPENAI_API_KEY` | Yes | — | Must have Realtime API access |
-| `REALTIME_MODEL` | No | `gpt-4o-realtime-preview` | Override the realtime model |
+| `REALTIME_MODEL` | No | `gpt-realtime-2` | Override the realtime model |
 | `GOOGLE_CLIENT_ID` | No | — | Google OAuth client ID (for user authentication) |
 | `GOOGLE_CLIENT_SECRET` | No | — | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | No | `http://localhost:8000/auth/callback` | OAuth callback URL |
