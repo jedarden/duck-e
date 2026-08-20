@@ -446,11 +446,31 @@ async def handle_media_stream(websocket: WebSocket):
         memory_store = UserMemoryStore(user_identity)
         memory_store.load()
 
+    # Check if we can start a new session (hourly limits, circuit breaker)
+    can_start = await cost_tracker.can_start_new_session()
+    if not can_start["allowed"]:
+        logger.warning(f"Cannot start new session: {can_start['reason']} - {session_id}")
+        try:
+            await websocket.send_json({
+                "type": "service_unavailable",
+                "error": can_start["message"],
+                "reason": can_start["reason"],
+                "reset_time": can_start.get("reset_time"),
+                "current_hourly_cost": can_start.get("current_hourly_cost")
+            })
+        except Exception:
+            pass
+        try:
+            await websocket.close(code=1013, reason="Service temporarily unavailable")
+        except Exception:
+            pass
+        return
+
     # Initialize cost tracking for this session
     await cost_tracker.start_session(session_id)
     logger.info(f"Cost tracking started for session: {session_id}")
 
-    # Check circuit breaker before allowing connection
+    # Check circuit breaker before allowing connection (redundant but safe)
     await cost_tracker.check_circuit_breaker()
     if cost_tracker.circuit_breaker_active:
         logger.warning(f"Circuit breaker active - rejecting session: {session_id}")
@@ -532,11 +552,11 @@ async def handle_media_stream(websocket: WebSocket):
         )
 
         if memory_store is not None:
-            user_display = forwarded_name or forwarded_email or forwarded_user
+            user_display = user_display_name or user_identity
             summary = await memory_store.get_or_generate_summary(first_config["api_key"])
             memory_section = f"\n\nThe current user is {user_display}"
-            if forwarded_email and forwarded_email != user_display:
-                memory_section += f" ({forwarded_email})"
+            if user_identity and user_identity != user_display:
+                memory_section += f" ({user_identity})"
             memory_section += "."
             if summary:
                 memory_section += f"\n{summary}"
@@ -575,6 +595,46 @@ async def handle_media_stream(websocket: WebSocket):
             logger=logger,
             on_turn_done=_on_turn_done if memory_store is not None else None,
         )
+
+        # Start session duration watchdog task
+        async def duration_watchdog():
+            """Monitor session duration and close if exceeds limit"""
+            max_duration_seconds = cost_tracker.config.max_session_duration_minutes * 60
+            check_interval = 10  # Check every 10 seconds
+
+            while True:
+                try:
+                    await asyncio.sleep(check_interval)
+
+                    # Check if session still exists
+                    if session_id not in cost_tracker.session_start_times:
+                        break  # Session ended
+
+                    # Check duration
+                    duration = (datetime.utcnow() - cost_tracker.session_start_times[session_id]).total_seconds()
+                    if duration >= max_duration_seconds:
+                        logger.warning(f"Session {session_id} exceeded max duration {max_duration_seconds}s, closing")
+                        try:
+                            await websocket.send_json({
+                                "type": "session_timeout",
+                                "error": f"Session exceeded maximum duration of {cost_tracker.config.max_session_duration_minutes} minutes",
+                                "duration_seconds": duration
+                            })
+                            await websocket.close(code=1008, reason="Session duration exceeded")
+                        except Exception:
+                            pass
+                        # Force session to end
+                        break
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Error in duration watchdog: {e}")
+
+        watchdog_task = None
+        try:
+            watchdog_task = asyncio.create_task(duration_watchdog())
+        except Exception as e:
+            logger.error(f"Failed to start duration watchdog: {e}")
     except IndexError as e:
         error_msg = f"Configuration error: Failed to access config_list - {str(e)}"
         logger.error(error_msg, exc_info=True)
@@ -753,14 +813,31 @@ async def handle_media_stream(websocket: WebSocket):
             # Track token usage for cost accounting
             if hasattr(response, 'usage') and response.usage:
                 try:
-                    await cost_tracker.track_usage(
+                    usage_result = await cost_tracker.track_usage(
                         session_id=session_id,
                         model="gpt-5.4-nano",
                         input_tokens=response.usage.input_tokens,
                         output_tokens=response.usage.output_tokens,
                     )
-                except Exception:
-                    pass  # Never crash the session over cost tracking
+
+                    # Check if budget was exceeded and terminate session if so
+                    if not usage_result.get("budget_ok", True):
+                        logger.warning(f"Budget exceeded for session {session_id}, closing connection")
+                        try:
+                            await websocket.send_json({
+                                "type": "budget_exceeded",
+                                "error": f"Session budget limit of ${cost_tracker.config.max_session_cost_usd:.2f} exceeded",
+                                "session_cost": usage_result.get("session_cost"),
+                                "warnings": usage_result.get("warnings", [])
+                            })
+                            await websocket.close(code=1008, reason="Budget limit exceeded")
+                        except Exception:
+                            pass
+                        raise RuntimeError("Budget exceeded, session terminated")
+                except RuntimeError:
+                    raise  # Re-raise budget exceeded errors
+                except Exception as e:
+                    logger.error(f"Error tracking usage: {e}")
                 try:
                     await session.send_backend_cost(
                         "gpt-5.4-nano",
@@ -1120,6 +1197,23 @@ async def handle_media_stream(websocket: WebSocket):
 
     try:
         await session.run()
+    except RuntimeError as e:
+        if "Budget exceeded" in str(e):
+            logger.warning(f"Session terminated due to budget exceeded: {session_id}")
+        else:
+            error_msg = f"RealtimeSession runtime error: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            try:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": "Connection to AI service failed. Please check your API key and network connection."
+                })
+            except:
+                pass  # Websocket may already be closed
+            try:
+                await websocket.close(code=1011, reason="Runtime error")
+            except:
+                pass  # Websocket may already be closed
     except Exception as e:
         error_msg = f"RealtimeSession runtime error: {str(e)}"
         logger.error(error_msg, exc_info=True)
@@ -1135,6 +1229,17 @@ async def handle_media_stream(websocket: WebSocket):
         except:
             pass  # Websocket may already be closed
     finally:
+        # Cancel watchdog task if it was started
+        if watchdog_task is not None:
+            try:
+                watchdog_task.cancel()
+                try:
+                    await watchdog_task
+                except asyncio.CancelledError:
+                    pass
+            except Exception as e:
+                logger.error(f"Error cancelling watchdog task: {e}")
+
         # End cost tracking session regardless of how the session terminates
         await cost_tracker.end_session(session_id)
         logger.info(f"Cost tracking ended for session: {session_id}")
