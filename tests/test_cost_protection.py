@@ -4,8 +4,10 @@ Tests budget enforcement, session tracking, and circuit breaker
 """
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import Mock, patch, AsyncMock, MagicMock
 import redis.asyncio as redis
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.middleware.cost_protection import (
     CostProtectionConfig,
@@ -349,6 +351,138 @@ class TestRedisIntegration:
 
         # Should still track in memory
         assert session_id in tracker.session_costs
+
+
+@pytest.mark.asyncio
+class TestWebSocketSessionTeardown:
+    """Test WebSocket session teardown calls end_session"""
+
+    @patch('app.main.get_realtime_config')
+    @patch('app.main.RealtimeSession')
+    async def test_end_session_called_on_normal_disconnect(self, mock_session_class, mock_get_config):
+        """Test that end_session is called when WebSocket session completes normally"""
+        from app.main import handle_media_stream
+        from fastapi import WebSocket
+
+        # Mock realtime config
+        mock_get_config.return_value = [{
+            "model": "gpt-realtime-2",
+            "api_key": "test-key"
+        }]
+
+        # Create mock websocket with required headers for security validator
+        mock_websocket = MagicMock(spec=WebSocket)
+        mock_websocket.headers = {
+            'origin': 'http://localhost:8000',  # Required by security validator
+            'host': 'localhost:8000'
+        }
+        mock_websocket.url = "ws://test/session"
+        mock_websocket.accept = AsyncMock()
+        mock_websocket.close = AsyncMock()
+        mock_websocket.send_json = AsyncMock()
+        mock_websocket.send_text = AsyncMock()
+
+        # Create a real tracker to verify cleanup
+        from app.middleware.cost_protection import get_cost_tracker
+        tracker = get_cost_tracker()
+
+        # Mock session to complete normally
+        mock_session = AsyncMock()
+        mock_session.run = AsyncMock()  # Completes without error
+        mock_session.register_tool = Mock()
+        mock_session.change_voice = AsyncMock(return_value="Voice changed to nova")
+        mock_session_class.return_value = mock_session
+
+        # Track calls to end_session
+        end_session_called = []
+        original_end_session = tracker.end_session
+        async def track_end_session(session_id):
+            end_session_called.append(session_id)
+            await original_end_session(session_id)
+
+        tracker.end_session = track_end_session
+
+        # Run the handler
+        await handle_media_stream(mock_websocket)
+
+        # Verify end_session was called
+        assert len(end_session_called) == 1, \
+            f"end_session should be called exactly once, was called {len(end_session_called)} times"
+        session_id = end_session_called[0]
+
+        # Verify session was cleaned up
+        assert session_id not in tracker.session_costs, \
+            "Session should be cleaned up after normal completion"
+        assert session_id not in tracker.session_start_times, \
+            "Session start time should be cleaned up after normal completion"
+        assert session_id not in tracker.session_tokens, \
+            "Session tokens should be cleaned up after normal completion"
+
+    @patch('app.main.get_realtime_config')
+    @patch('app.main.RealtimeSession')
+    async def test_end_session_called_on_runtime_error(self, mock_session_class, mock_get_config):
+        """Test that end_session is called when session.run() raises an exception"""
+        from app.main import handle_media_stream
+        from fastapi import WebSocket
+
+        # Mock realtime config
+        mock_get_config.return_value = [{
+            "model": "gpt-realtime-2",
+            "api_key": "test-key"
+        }]
+
+        # Create mock websocket with required headers for security validator
+        mock_websocket = MagicMock(spec=WebSocket)
+        mock_websocket.headers = {
+            'origin': 'http://localhost:8000',  # Required by security validator
+            'host': 'localhost:8000'
+        }
+        mock_websocket.url = "ws://test/session"
+        mock_websocket.accept = AsyncMock()
+        mock_websocket.close = AsyncMock()
+        mock_websocket.send_json = AsyncMock()
+        mock_websocket.send_text = AsyncMock()
+
+        # Create a real tracker to verify cleanup
+        from app.middleware.cost_protection import get_cost_tracker
+        tracker = get_cost_tracker()
+
+        # Mock session to raise a runtime error
+        mock_session = AsyncMock()
+        mock_session.run = AsyncMock(
+            side_effect=Exception("Runtime error: Connection failed")
+        )
+        mock_session.register_tool = Mock()
+        mock_session.change_voice = AsyncMock(return_value="Voice changed to nova")
+        mock_session_class.return_value = mock_session
+
+        # Track calls to end_session
+        end_session_called = []
+        original_end_session = tracker.end_session
+        async def track_end_session(session_id):
+            end_session_called.append(session_id)
+            await original_end_session(session_id)
+
+        tracker.end_session = track_end_session
+
+        # Run the handler (should handle exception gracefully)
+        try:
+            await handle_media_stream(mock_websocket)
+        except Exception:
+            pass  # Expected to raise
+
+        # Verify end_session was called even after exception
+        assert len(end_session_called) == 1, \
+            f"end_session should be called exactly once even after exception, was called {len(end_session_called)} times"
+        session_id = end_session_called[0]
+
+        # Verify session was cleaned up even after error
+        assert session_id not in tracker.session_costs, \
+            "Session should be cleaned up even after runtime error"
+        assert session_id not in tracker.session_start_times, \
+            "Session start time should be cleaned up even after runtime error"
+        assert session_id not in tracker.session_tokens, \
+            "Session tokens should be cleaned up even after runtime error"
 
 
 if __name__ == "__main__":
