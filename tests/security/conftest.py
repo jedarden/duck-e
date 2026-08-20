@@ -1,6 +1,8 @@
 """
 Pytest configuration and fixtures for authentication tests
 """
+import os
+import sys
 import pytest
 from datetime import datetime, timedelta, timezone
 from jose import jwt
@@ -10,6 +12,30 @@ from typing import Dict, Any
 # Test JWT configuration
 TEST_SECRET_KEY = "test-secret-key-for-jwt-validation-only"  # pragma: allowlist secret
 TEST_ALGORITHM = "HS256"
+
+
+@pytest.fixture(autouse=True)
+def set_jwt_secret_key(monkeypatch, request):
+    """
+    Set JWT_SECRET_KEY environment variable for all authentication tests.
+    This ensures tests don't rely on the insecure default secret.
+    Skips TestDefaultSecretRejection tests which need the default/secret to test rejection.
+    """
+    # Skip setting the secret for tests that specifically test default secret rejection
+    # Check if the test class name contains "DefaultSecretRejection"
+    test_class_name = request.node.cls.__name__ if request.node.cls else ""
+    if "DefaultSecretRejection" in test_class_name:
+        yield
+        return
+
+    monkeypatch.setenv("JWT_SECRET_KEY", TEST_SECRET_KEY)
+    # Force reload of auth module to pick up new environment variable
+    import importlib
+    if "app.middleware.auth" in sys.modules:
+        importlib.reload(sys.modules["app.middleware.auth"])
+    if "app.middleware.google_oauth" in sys.modules:
+        importlib.reload(sys.modules["app.middleware.google_oauth"])
+    yield
 
 
 @pytest.fixture

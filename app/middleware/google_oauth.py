@@ -366,8 +366,15 @@ def get_user_info_from_token(token: str) -> Optional[Dict[str, Any]]:
     """
     Extract user information from JWT token
     Returns dict with email, name, picture, tier, auth_method or None
+
+    Security: Returns None if JWT_SECRET_KEY is using default value
     """
     try:
+        # Fail closed: refuse to validate tokens if using default secret
+        if not JWT_SECRET_KEY or JWT_SECRET_KEY == "your-secret-key-here-change-in-production":
+            logger.warning("SECURITY: Rejecting token validation - default JWT secret in use")
+            return None
+
         payload = jwt.decode(
             token,
             JWT_SECRET_KEY,

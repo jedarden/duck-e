@@ -23,11 +23,43 @@ from app.models.user import UserTier, TIER_CONFIGURATIONS, TokenData, TierLimits
 
 logger = logging.getLogger(__name__)
 
+# The default secret that should NEVER be used in production
+_DEFAULT_SECRET = "your-secret-key-here-change-in-production"
+_JWT_SECRET_WARNING_LOGGED = False
+
 # JWT Configuration from environment
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here-change-in-production")
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", _DEFAULT_SECRET)
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_EXPIRATION_MINUTES", "120"))
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+
+def _is_using_default_secret() -> bool:
+    """
+    Check if JWT is configured with the publicly-known default secret.
+    Returns True if JWT_SECRET_KEY is unset or equals the default string.
+    """
+    return not JWT_SECRET_KEY or JWT_SECRET_KEY == _DEFAULT_SECRET
+
+
+def _warn_if_default_secret() -> None:
+    """
+    Log a one-time warning if using the default JWT secret.
+    This should be called once at application startup.
+    """
+    global _JWT_SECRET_WARNING_LOGGED
+    if _is_using_default_secret() and not _JWT_SECRET_WARNING_LOGGED:
+        logger.error(
+            "SECURITY WARNING: JWT_SECRET_KEY is using the default value or is unset. "
+            "JWT token validation and creation will be disabled. "
+            "Set JWT_SECRET_KEY environment variable to a secure random value. "
+            "This allows attackers to forge tokens and impersonate users."
+        )
+        _JWT_SECRET_WARNING_LOGGED = True
+
+
+# Log warning once at module import
+_warn_if_default_secret()
 
 # Redis for token revocation (optional)
 REDIS_URL = os.getenv("REDIS_URL")
@@ -66,7 +98,18 @@ def create_access_token(
 
     Returns:
         Encoded JWT token string
+
+    Raises:
+        HTTPException: 500 if JWT_SECRET_KEY is using the default value
     """
+    # Fail closed: refuse to mint tokens with default secret
+    if _is_using_default_secret():
+        logger.error("SECURITY: Refusing to create access token with default JWT secret")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="JWT authentication is not properly configured. Set JWT_SECRET_KEY environment variable to a secure random value."
+        )
+
     to_encode = payload.copy()
 
     # Set expiration
@@ -97,7 +140,18 @@ def create_refresh_token(payload: Dict[str, Any]) -> str:
 
     Returns:
         Encoded JWT refresh token string
+
+    Raises:
+        HTTPException: 500 if JWT_SECRET_KEY is using the default value
     """
+    # Fail closed: refuse to mint tokens with default secret
+    if _is_using_default_secret():
+        logger.error("SECURITY: Refusing to create refresh token with default JWT secret")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="JWT authentication is not properly configured. Set JWT_SECRET_KEY environment variable to a secure random value."
+        )
+
     to_encode = payload.copy()
 
     # Refresh tokens last 7 days
@@ -126,7 +180,17 @@ def validate_token(token: str) -> Dict[str, Any]:
 
     Raises:
         HTTPException: 401 if token is invalid, expired, or revoked
+                       401 if JWT_SECRET_KEY is using default value (security)
     """
+    # Fail closed: refuse to validate tokens if using default secret
+    if _is_using_default_secret():
+        logger.warning("SECURITY: Rejecting token validation - default JWT secret in use")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="JWT authentication is not properly configured",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
     try:
         # Decode and verify signature
         payload = jwt.decode(
