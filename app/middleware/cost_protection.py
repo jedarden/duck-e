@@ -93,6 +93,10 @@ class CostProtectionConfig(BaseModel):
     gpt5_mini_output_cost_per_1m: float = Field(default=15.0)
     gpt_realtime_input_cost_per_1m: float = Field(default=100.0)
     gpt_realtime_output_cost_per_1m: float = Field(default=200.0)
+    gpt_realtime_2_input_cost_per_1m: float = Field(default=100.0)
+    gpt_realtime_2_output_cost_per_1m: float = Field(default=200.0)
+    gpt_5_4_nano_input_cost_per_1m: float = Field(default=0.15)
+    gpt_5_4_nano_output_cost_per_1m: float = Field(default=0.60)
 
     class Config:
         env_prefix = "COST_PROTECTION_"
@@ -129,6 +133,7 @@ class SessionCostTracker:
         self.circuit_breaker_active = False
         self.circuit_breaker_reset_time: Optional[datetime] = None
         self.total_cost_last_hour = 0.0
+        self.hourly_cost_window_start: Optional[datetime] = None
 
         logger.info("SessionCostTracker initialized")
 
@@ -183,7 +188,7 @@ class SessionCostTracker:
         Calculate cost for API call based on token usage
 
         Args:
-            model: Model name (gpt-5, gpt-5-mini, gpt-realtime)
+            model: Model name (gpt-5, gpt-5-mini, gpt-realtime, gpt-5.4-nano, gpt-realtime-2)
             input_tokens: Number of input tokens
             output_tokens: Number of output tokens
 
@@ -192,16 +197,22 @@ class SessionCostTracker:
         """
         config = self.config
 
+        # Normalize model name (handle variations)
+        model_normalized = model.lower().strip()
+
         # Determine pricing based on model
-        if model == "gpt-5":
+        if model_normalized == "gpt-5":
             input_cost_per_1m = config.gpt5_input_cost_per_1m
             output_cost_per_1m = config.gpt5_output_cost_per_1m
-        elif model == "gpt-5-mini":
+        elif model_normalized == "gpt-5-mini":
             input_cost_per_1m = config.gpt5_mini_input_cost_per_1m
             output_cost_per_1m = config.gpt5_mini_output_cost_per_1m
-        elif model == "gpt-realtime":
-            input_cost_per_1m = config.gpt_realtime_input_cost_per_1m
-            output_cost_per_1m = config.gpt_realtime_output_cost_per_1m
+        elif model_normalized in ("gpt-realtime", "gpt-realtime-2"):
+            input_cost_per_1m = config.gpt_realtime_2_input_cost_per_1m
+            output_cost_per_1m = config.gpt_realtime_2_output_cost_per_1m
+        elif model_normalized == "gpt-5.4-nano":
+            input_cost_per_1m = config.gpt_5_4_nano_input_cost_per_1m
+            output_cost_per_1m = config.gpt_5_4_nano_output_cost_per_1m
         else:
             logger.warning(f"Unknown model {model}, using gpt-5-mini pricing")
             input_cost_per_1m = config.gpt5_mini_input_cost_per_1m
@@ -244,6 +255,24 @@ class SessionCostTracker:
         # Update token counters
         self.session_tokens[session_id]["input"] += input_tokens
         self.session_tokens[session_id]["output"] += output_tokens
+
+        # Update hourly cost tracking
+        now = datetime.utcnow()
+        if self.hourly_cost_window_start is None:
+            self.hourly_cost_window_start = now
+            self.total_cost_last_hour = cost
+        elif (now - self.hourly_cost_window_start).total_seconds() < 3600:
+            # Within the same hour window
+            self.total_cost_last_hour += cost
+        else:
+            # Start a new hour window
+            self.hourly_cost_window_start = now
+            self.total_cost_last_hour = cost
+
+        # Check if we should activate circuit breaker
+        total_system_cost = sum(self.session_costs.values())
+        if total_system_cost >= self.config.circuit_breaker_threshold_usd and not self.circuit_breaker_active:
+            await self.activate_circuit_breaker()
 
         # Update Prometheus metrics
         api_cost_total.labels(model=model, session_id=session_id).inc(cost)
@@ -310,8 +339,11 @@ class SessionCostTracker:
         # Check circuit breaker
         circuit_breaker_ok = not self.circuit_breaker_active
 
+        # Check hourly cost limit
+        hourly_ok = self.total_cost_last_hour < config.max_total_cost_per_hour_usd
+
         # Overall status
-        overall_ok = budget_ok and duration_ok and circuit_breaker_ok
+        overall_ok = budget_ok and duration_ok and circuit_breaker_ok and hourly_ok
 
         if not overall_ok:
             budget_exceeded.labels(session_id=session_id).inc()
@@ -321,10 +353,12 @@ class SessionCostTracker:
             "remaining_budget_usd": max(0, remaining_budget),
             "remaining_duration_seconds": max(0, remaining_duration),
             "circuit_breaker_active": self.circuit_breaker_active,
-            "warnings": self._get_warnings(budget_ok, duration_ok, circuit_breaker_ok)
+            "hourly_cost_usd": self.total_cost_last_hour,
+            "max_hourly_cost_usd": config.max_total_cost_per_hour_usd,
+            "warnings": self._get_warnings(budget_ok, duration_ok, circuit_breaker_ok, hourly_ok)
         }
 
-    def _get_warnings(self, budget_ok: bool, duration_ok: bool, circuit_breaker_ok: bool) -> list:
+    def _get_warnings(self, budget_ok: bool, duration_ok: bool, circuit_breaker_ok: bool, hourly_ok: bool = True) -> list:
         """Generate warning messages for budget status"""
         warnings = []
 
@@ -334,6 +368,8 @@ class SessionCostTracker:
             warnings.append("Session duration limit exceeded")
         if not circuit_breaker_ok:
             warnings.append("System-wide circuit breaker is active")
+        if not hourly_ok:
+            warnings.append("Hourly cost limit exceeded")
 
         return warnings
 
@@ -355,6 +391,38 @@ class SessionCostTracker:
                 self.circuit_breaker_active = False
                 self.circuit_breaker_reset_time = None
                 logger.info("Circuit breaker reset")
+
+    async def can_start_new_session(self) -> Dict[str, any]:
+        """
+        Check if a new session can be started based on hourly limits
+
+        Returns:
+            Dict with status and reason if denied
+        """
+        # Check circuit breaker first
+        await self.check_circuit_breaker()
+        if self.circuit_breaker_active:
+            return {
+                "allowed": False,
+                "reason": "circuit_breaker",
+                "message": "Circuit breaker is active",
+                "reset_time": self.circuit_breaker_reset_time.isoformat() if self.circuit_breaker_reset_time else None
+            }
+
+        # Check hourly cost limit
+        if self.total_cost_last_hour >= self.config.max_total_cost_per_hour_usd:
+            return {
+                "allowed": False,
+                "reason": "hourly_limit",
+                "message": f"Hourly cost limit ${self.config.max_total_cost_per_hour_usd:.2f} exceeded",
+                "current_hourly_cost": self.total_cost_last_hour
+            }
+
+        return {
+            "allowed": True,
+            "reason": None,
+            "message": "Session can be started"
+        }
 
 
 # Global cost tracker instance
