@@ -471,8 +471,8 @@ async def handle_media_stream(websocket: WebSocket):
         await cost_tracker.end_session(session_id)
         return
 
-    # Validate configuration before initializing RealtimeAgent
     try:
+        # Validate configuration before initializing RealtimeAgent
         # Check if config_list exists and is not empty
         if not realtime_llm_config.get("config_list"):
             error_msg = "Configuration error: No realtime models found in OAI_CONFIG_LIST. Please ensure you have entries tagged with 'gpt-realtime'."
@@ -1134,3 +1134,7 @@ async def handle_media_stream(websocket: WebSocket):
             await websocket.close(code=1011, reason="Runtime error")
         except:
             pass  # Websocket may already be closed
+    finally:
+        # End cost tracking session regardless of how the session terminates
+        await cost_tracker.end_session(session_id)
+        logger.info(f"Cost tracking ended for session: {session_id}")
