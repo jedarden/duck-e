@@ -10,6 +10,8 @@ Test Coverage:
 - Token refresh mechanism
 - Security features (CSRF, session hijacking)
 """
+import os
+import sys
 import pytest
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
@@ -679,3 +681,124 @@ class TestAcceptanceCriteria:
         new_token = refresh_access_token(refresh_token)
         assert new_token is not None
         assert new_token != refresh_token
+
+
+class TestDefaultSecretRejection:
+    """Test that tokens signed with the default secret are rejected (security fix)"""
+
+    def test_token_signed_with_default_secret_is_rejected(self):
+        """
+        CRITICAL SECURITY TEST: Tokens signed with the default secret MUST be rejected.
+        This prevents attackers from forging tokens when JWT_SECRET_KEY is unset.
+        """
+        from app.middleware.auth import validate_token
+        from app.middleware.google_oauth import get_user_info_from_token
+
+        # The default secret from the codebase
+        default_secret = "your-secret-key-here-change-in-production"
+
+        # Create a token signed with the default secret
+        forged_payload = {
+            "sub": "attacker@example.com",
+            "email": "attacker@example.com",
+            "name": "Fake User",
+            "tier": "premium",
+            "auth_method": "google_oauth",
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+        }
+        forged_token = jwt.encode(forged_payload, default_secret, algorithm=TEST_ALGORITHM)
+
+        # Token validation MUST fail - even if the signature is valid
+        with pytest.raises(HTTPException) as exc_info:
+            validate_token(forged_token)
+
+        assert exc_info.value.status_code == 401
+        assert "not properly configured" in str(exc_info.value.detail).lower()
+
+        # get_user_info_from_token MUST return None (fail closed)
+        user_info = get_user_info_from_token(forged_token)
+        assert user_info is None, "Default secret tokens must be rejected"
+
+    def test_create_access_token_refuses_default_secret(self):
+        """
+        CRITICAL SECURITY TEST: Creating tokens with default secret must fail.
+        This prevents accidental use of the default secret in production.
+        """
+        from app.middleware.auth import create_access_token
+
+        # Token creation MUST raise HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            create_access_token({"sub": "test@example.com"})
+
+        assert exc_info.value.status_code == 500
+        assert "not properly configured" in str(exc_info.value.detail).lower()
+
+    def test_create_refresh_token_refuses_default_secret(self):
+        """
+        CRITICAL SECURITY TEST: Creating refresh tokens with default secret must fail.
+        """
+        from app.middleware.auth import create_refresh_token
+
+        # Token creation MUST raise HTTPException
+        with pytest.raises(HTTPException) as exc_info:
+            create_refresh_token({"sub": "test@example.com"})
+
+        assert exc_info.value.status_code == 500
+        assert "not properly configured" in str(exc_info.value.detail).lower()
+
+    def test_with_proper_secret_round_trip_works(self):
+        """
+        ACCEPTANCE CRITERIA: With a proper JWT_SECRET_KEY set,
+        round-trip token creation and validation must work correctly.
+        This test runs when JWT_SECRET_KEY is set by the conftest fixture.
+        """
+        from app.middleware.auth import create_access_token, validate_token
+        from app.middleware.google_oauth import get_user_info_from_token
+
+        # Temporarily set a proper secret for this test
+        import os
+        original_secret = os.environ.get("JWT_SECRET_KEY")
+        os.environ["JWT_SECRET_KEY"] = TEST_SECRET_KEY
+
+        # Force reload of auth module
+        import importlib
+        if "app.middleware.auth" in sys.modules:
+            importlib.reload(sys.modules["app.middleware.auth"])
+        if "app.middleware.google_oauth" in sys.modules:
+            importlib.reload(sys.modules["app.middleware.google_oauth"])
+
+        try:
+            payload = {
+                "sub": "user@example.com",
+                "email": "user@example.com",
+                "name": "Test User",
+                "tier": "premium",
+                "auth_method": "google_oauth"
+            }
+
+            # Create token - should succeed with proper secret
+            token = create_access_token(payload)
+            assert token is not None
+
+            # Validate token - should succeed
+            decoded = validate_token(token)
+            assert decoded["sub"] == "user@example.com"
+            assert decoded["email"] == "user@example.com"
+
+            # get_user_info_from_token should work
+            user_info = get_user_info_from_token(token)
+            assert user_info is not None
+            assert user_info["email"] == "user@example.com"
+            assert user_info["name"] == "Test User"
+        finally:
+            # Restore original secret
+            if original_secret is None:
+                os.environ.pop("JWT_SECRET_KEY", None)
+            else:
+                os.environ["JWT_SECRET_KEY"] = original_secret
+
+            # Reload again to restore
+            if "app.middleware.auth" in sys.modules:
+                importlib.reload(sys.modules["app.middleware.auth"])
+            if "app.middleware.google_oauth" in sys.modules:
+                importlib.reload(sys.modules["app.middleware.google_oauth"])
