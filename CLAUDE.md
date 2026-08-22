@@ -34,7 +34,6 @@ pip install -r requirements.txt
 
 # Set required env vars in .env:
 # OPENAI_API_KEY=sk-...
-# WEATHER_API_KEY=...
 
 # Run dev server
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
@@ -44,7 +43,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 docker build -t duck-e:latest .
-docker run -p 8000:8000 -e OPENAI_API_KEY=... -e WEATHER_API_KEY=... duck-e:latest
+docker run -p 8000:8000 -e OPENAI_API_KEY=... duck-e:latest
 ```
 
 ## Important Patterns

@@ -10,7 +10,6 @@ from typing import Generator
 def setup_test_environment():
     """Set up test environment variables"""
     os.environ["OPENAI_API_KEY"] = "test-key"  # pragma: allowlist secret
-    os.environ["WEATHER_API_KEY"] = "test-weather-key"  # pragma: allowlist secret
     os.environ["RATE_LIMIT_ENABLED"] = "true"
     os.environ["COST_PROTECTION_ENABLED"] = "true"
 

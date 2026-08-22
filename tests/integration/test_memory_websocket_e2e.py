@@ -18,7 +18,6 @@ import time
 
 # Set environment variables BEFORE importing app modules
 os.environ["OPENAI_API_KEY"] = "test-key-for-memory-e2e"
-os.environ["WEATHER_API_KEY"] = "test-weather-key"
 
 from app.memory import UserMemoryStore, FactCategory, FactSource, DEFAULT_MEMORY_DIR
 
