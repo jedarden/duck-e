@@ -69,6 +69,108 @@ from ipaddress import ip_address, IPv4Address, IPv6Address, AddressValueError
 # Load and validate realtime configuration using auto-generated config
 logger = getLogger("uvicorn.error")
 
+
+class _PrivateAddressResolutionError(Exception):
+    """Raised when DNS returns an address that must not be contacted."""
+
+    def __init__(self, hostname: str, ip: str):
+        self.hostname = hostname
+        self.ip = ip
+        super().__init__(f"{hostname} resolves to private IP {ip}")
+
+
+def _is_private_ip(ip_str: str) -> bool:
+    """Check if an IP address is private/internal (SSRF protection)."""
+    try:
+        addr = ip_address(ip_str)
+        if isinstance(addr, IPv4Address):
+            return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+        elif isinstance(addr, IPv6Address):
+            return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
+    except (ValueError, AddressValueError):
+        pass
+    return False
+
+
+def _hostname_key(hostname: str) -> str:
+    """Normalize a hostname for the per-request pinned-address map."""
+    return hostname.rstrip(".").lower()
+
+
+def _resolve_vetted_ip(hostname: str, port: int | None) -> str:
+    """Resolve all addresses once, reject unsafe answers, and return one safe IP."""
+    addresses = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    vetted_addresses: list[str] = []
+    private_address: str | None = None
+
+    for address_info in addresses:
+        try:
+            family = address_info[0]
+            sockaddr = address_info[4]
+            resolved_ip = sockaddr[0]
+        except (IndexError, TypeError):
+            raise socket.gaierror(f"Invalid DNS answer for {hostname}") from None
+
+        if family not in (socket.AF_INET, socket.AF_INET6):
+            raise socket.gaierror(f"Unsupported address family for {hostname}")
+
+        try:
+            ip_address(resolved_ip)
+        except (TypeError, ValueError):
+            raise socket.gaierror(f"Invalid IP address for {hostname}") from None
+
+        if _is_private_ip(resolved_ip):
+            private_address = private_address or resolved_ip
+        else:
+            vetted_addresses.append(resolved_ip)
+
+    if private_address is not None:
+        raise _PrivateAddressResolutionError(hostname, private_address)
+
+    if not vetted_addresses:
+        raise socket.gaierror(f"No addresses returned for {hostname}")
+
+    return vetted_addresses[0]
+
+
+class _PinnedAddressTransport(httpx.AsyncBaseTransport):
+    """Send requests to previously vetted IPs without another hostname lookup."""
+
+    def __init__(self, pinned_addresses: dict[str, str] | None = None, transport=None):
+        self._pinned_addresses = pinned_addresses if pinned_addresses is not None else {}
+        self._transport = transport or httpx.AsyncHTTPTransport()
+
+    def pin(self, hostname: str, ip: str) -> None:
+        self._pinned_addresses[_hostname_key(hostname)] = ip
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        original_hostname = request.url.host
+        pinned_ip = self._pinned_addresses.get(_hostname_key(original_hostname))
+        if pinned_ip is None:
+            raise httpx.ConnectError(
+                f"No vetted address available for hostname: {original_hostname}",
+                request=request,
+            )
+
+        pinned_url = request.url.copy_with(host=pinned_ip)
+        extensions = dict(request.extensions)
+        if request.url.scheme == "https":
+            # httpcore uses this extension for TLS SNI while the URL host is the
+            # vetted IP. The original Host header is retained below as well.
+            extensions["sni_hostname"] = original_hostname
+
+        pinned_request = httpx.Request(
+            method=request.method,
+            url=pinned_url,
+            headers=request.headers,
+            stream=request.stream,
+            extensions=extensions,
+        )
+        return await self._transport.handle_async_request(pinned_request)
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
 try:
     realtime_config_list = get_realtime_config()
 
@@ -884,18 +986,6 @@ async def handle_media_stream(websocket: WebSocket):
         }
     )
 
-    def _is_private_ip(ip_str: str) -> bool:
-        """Check if an IP address is private/internal (SSRF protection)."""
-        try:
-            addr = ip_address(ip_str)
-            if isinstance(addr, IPv4Address):
-                return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
-            elif isinstance(addr, IPv6Address):
-                return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved
-        except (ValueError, AddressValueError):
-            pass
-        return False
-
     async def web_fetch(url: Annotated[str, "url"]) -> str:
         """
         Fetch content from a URL with SSRF protection.
@@ -918,42 +1008,49 @@ async def handle_media_stream(websocket: WebSocket):
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             }
 
-            # Parse hostname for initial SSRF check
+            # Parse hostname for initial SSRF check and transport pinning.
             from urllib.parse import urlparse
             parsed = urlparse(safe_url)
             initial_hostname = parsed.hostname
+            pinned_transport = _PinnedAddressTransport()
 
             async def validate_redirect_hop(response: httpx.Response) -> None:
                 """
                 Event hook to validate each redirect hop before following.
-                Raises httpx.HTTPStatusError if redirect target resolves to a private IP.
-                Called by httpx for each redirect response (3xx status codes).
+                Resolves and pins the target before httpx follows it. This avoids
+                both DNS-rebinding TOCTOU and IPv6-only SSRF bypasses.
                 """
-                if response.is_redirect and response.next_request:
-                    redirect_url = str(response.next_request.url)
-                    redirect_hostname = urlparse(redirect_url).hostname
+                if response.is_redirect:
+                    if response.next_request:
+                        redirect_url = response.next_request.url
+                    elif response.has_redirect_location:
+                        redirect_url = response.request.url.join(response.headers["location"])
+                    else:
+                        return
+                    redirect_hostname = redirect_url.host
 
                     if redirect_hostname:
                         try:
-                            loop = asyncio.get_event_loop()
-                            redirect_ip = await loop.run_in_executor(
-                                None,
-                                lambda: socket.gethostbyname(redirect_hostname)
+                            redirect_ip = await asyncio.to_thread(
+                                _resolve_vetted_ip,
+                                redirect_hostname,
+                                redirect_url.port,
                             )
-                            if _is_private_ip(redirect_ip):
-                                logger.warning(json.dumps({
-                                    "event": "web_fetch.redirect_ssrf_blocked",
-                                    "original_url": safe_url,
-                                    "redirect_url": redirect_url,
-                                    "hostname": redirect_hostname,
-                                    "ip": redirect_ip,
-                                    "ts": time.time()
-                                }))
-                                raise httpx.HTTPStatusError(
-                                    f"Redirect to private IP blocked: {redirect_hostname} -> {redirect_ip}",
-                                    request=response.request,
-                                    response=response
-                                )
+                            pinned_transport.pin(redirect_hostname, redirect_ip)
+                        except _PrivateAddressResolutionError as e:
+                            logger.warning(json.dumps({
+                                "event": "web_fetch.redirect_ssrf_blocked",
+                                "original_url": safe_url,
+                                "redirect_url": str(redirect_url),
+                                "hostname": redirect_hostname,
+                                "ip": e.ip,
+                                "ts": time.time()
+                            }))
+                            raise httpx.HTTPStatusError(
+                                f"Redirect to private IP blocked: {redirect_hostname} -> {e.ip}",
+                                request=response.request,
+                                response=response
+                            )
                         except socket.gaierror as e:
                             logger.warning(f"DNS resolution failed for redirect hostname: {redirect_hostname}")
                             raise httpx.HTTPStatusError(
@@ -963,15 +1060,20 @@ async def handle_media_stream(websocket: WebSocket):
                             )
 
             if initial_hostname:
-                # Resolve initial hostname to IP and check if private
+                # Resolve all initial addresses once and pin the connection to a
+                # vetted result. The transport never resolves this hostname again.
                 try:
-                    loop = asyncio.get_event_loop()
-                    initial_ip = await loop.run_in_executor(None, lambda: socket.gethostbyname(initial_hostname))
-                    if _is_private_ip(initial_ip):
-                        logger.warning(json.dumps({"event": "web_fetch.ssrf_blocked",
-                                                    "url": safe_url, "hostname": initial_hostname,
-                                                    "ip": initial_ip, "ts": time.time()}))
-                        return json.dumps({"error": "Cannot fetch from internal/private addresses"})
+                    initial_ip = await asyncio.to_thread(
+                        _resolve_vetted_ip,
+                        initial_hostname,
+                        parsed.port,
+                    )
+                    pinned_transport.pin(initial_hostname, initial_ip)
+                except _PrivateAddressResolutionError as e:
+                    logger.warning(json.dumps({"event": "web_fetch.ssrf_blocked",
+                                                "url": safe_url, "hostname": initial_hostname,
+                                                "ip": e.ip, "ts": time.time()}))
+                    return json.dumps({"error": "Cannot fetch from internal/private addresses"})
                 except socket.gaierror:
                     logger.warning(f"DNS resolution failed for hostname: {initial_hostname}")
                     return json.dumps({"error": "Failed to resolve hostname"})
@@ -982,7 +1084,8 @@ async def handle_media_stream(websocket: WebSocket):
                 timeout=15.0,
                 follow_redirects=True,
                 max_redirects=5,
-                event_hooks=event_hooks
+                event_hooks=event_hooks,
+                transport=pinned_transport,
             ) as client:
                 response = await client.get(safe_url, headers=headers)
 
