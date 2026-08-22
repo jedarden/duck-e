@@ -13,6 +13,7 @@ from typing import Optional, Callable
 import os
 import logging
 from pydantic import BaseModel, Field
+from pydantic import ConfigDict
 from prometheus_client import Counter, Histogram
 
 logger = logging.getLogger(__name__)
@@ -69,8 +70,9 @@ class RateLimitConfig(BaseModel):
         description="Rate limit for web search calls"
     )
 
-    class Config:
-        env_prefix = "RATE_LIMIT_"
+    model_config = ConfigDict(
+        from_attributes=True
+    )
 
 
 def get_rate_limit_config() -> RateLimitConfig:
