@@ -12,6 +12,7 @@ Attack vector:
 3. Without validation, the request goes to the internal AWS metadata endpoint
 """
 
+import json
 import pytest
 import asyncio
 import socket
@@ -171,6 +172,42 @@ class TestRedirectHopValidation:
 class TestWebFetchIntegration:
     """Integration tests for web_fetch with redirect validation"""
 
+    async def _get_web_fetch_handler(self, monkeypatch, transport):
+        """Register web_fetch on a fake session and return its handler."""
+        import app.main as main
+        from app.main import handle_media_stream
+
+        fake_session = MagicMock()
+        fake_session.run = AsyncMock()
+        monkeypatch.setattr(main, "RealtimeSession", lambda **kwargs: fake_session)
+        monkeypatch.setattr(main, "realtime_llm_config", {
+            "config_list": [{"model": "test-model", "api_key": "test-key"}]
+        })
+        monkeypatch.setattr(main.ws_security, "validate_connection", AsyncMock(return_value=True))
+        monkeypatch.setattr(main.httpx, "AsyncHTTPTransport", lambda: transport)
+
+        websocket = MagicMock()
+        websocket.headers = {"origin": "http://localhost:8000", "host": "localhost:8000"}
+        websocket.url = "ws://localhost/session"
+        await handle_media_stream(websocket)
+
+        for call in fake_session.register_tool.call_args_list:
+            if call.kwargs.get("name") == "web_fetch":
+                return call.kwargs["handler"]
+        raise AssertionError("web_fetch handler was not registered")
+
+    class RecordingTransport(httpx.AsyncBaseTransport):
+        def __init__(self, response_factory):
+            self.requests = []
+            self.response_factory = response_factory
+
+        async def handle_async_request(self, request):
+            self.requests.append(request)
+            return self.response_factory(request)
+
+        async def aclose(self):
+            pass
+
     @pytest.mark.asyncio
     async def test_httpx_client_has_event_hook_configured(self):
         """
@@ -191,11 +228,119 @@ class TestWebFetchIntegration:
         assert "follow_redirects=True" in source, "follow_redirects must be enabled"
         assert "response.is_redirect" in source, "Must check if response is a redirect"
         assert "redirect_ip" in source, "Must resolve redirect hostname to IP"
-        assert "_is_private_ip" in source, "Must check if redirect IP is private"
+        assert "_resolve_vetted_ip" in source, "Must resolve redirect addresses once"
+        assert "transport=pinned_transport" in source, "Must use the pinned transport"
+
+    @pytest.mark.asyncio
+    async def test_web_fetch_blocks_mixed_public_and_private_dns_answers(self, monkeypatch):
+        """Every address in a DNS answer must be safe before fetching."""
+        import app.main as main
+
+        resolver = Mock(return_value=[
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.1", 80)),
+        ])
+        monkeypatch.setattr(main.socket, "getaddrinfo", resolver)
+        transport = self.RecordingTransport(
+            lambda request: httpx.Response(200, headers={"content-type": "text/plain"}, text="unexpected")
+        )
+        handler = await self._get_web_fetch_handler(monkeypatch, transport)
+
+        result = json.loads(await handler("http://rebind.example/path"))
+
+        assert result["error"] == "Cannot fetch from internal/private addresses"
+        assert transport.requests == []
+        assert resolver.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_web_fetch_blocks_private_ipv6_with_public_ipv4(self, monkeypatch):
+        """A private AAAA answer cannot be bypassed by a public A answer."""
+        import app.main as main
+
+        resolver = Mock(return_value=[
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("::1", 80, 0, 0)),
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80)),
+        ])
+        monkeypatch.setattr(main.socket, "getaddrinfo", resolver)
+        transport = self.RecordingTransport(
+            lambda request: httpx.Response(200, headers={"content-type": "text/plain"}, text="unexpected")
+        )
+        handler = await self._get_web_fetch_handler(monkeypatch, transport)
+
+        result = json.loads(await handler("http://dualstack.example/path"))
+
+        assert result["error"] == "Cannot fetch from internal/private addresses"
+        assert transport.requests == []
+        assert resolver.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_web_fetch_connects_to_vetted_ip_without_second_hostname_resolution(self, monkeypatch):
+        """The transport target is the vetted IP, while Host and SNI stay original."""
+        import app.main as main
+
+        resolver = Mock(return_value=[
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+        ])
+        monkeypatch.setattr(main.socket, "getaddrinfo", resolver)
+        transport = self.RecordingTransport(
+            lambda request: httpx.Response(
+                200,
+                headers={"content-type": "text/plain"},
+                text="public content",
+            )
+        )
+        handler = await self._get_web_fetch_handler(monkeypatch, transport)
+
+        result = json.loads(await handler("https://public.example/path"))
+
+        assert result["text"] == "public content"
+        assert len(transport.requests) == 1
+        outbound_request = transport.requests[0]
+        assert outbound_request.url.host == "93.184.216.34"
+        assert outbound_request.headers["host"] == "public.example"
+        assert outbound_request.extensions["sni_hostname"] == "public.example"
+        assert resolver.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_web_fetch_pins_each_public_redirect_hop(self, monkeypatch):
+        """Redirect validation resolves and pins the next hop before following it."""
+        import app.main as main
+
+        resolver = Mock(side_effect=[
+            [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 80))],
+            [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.35", 80))],
+        ])
+        monkeypatch.setattr(main.socket, "getaddrinfo", resolver)
+
+        def response_factory(request):
+            if len(transport.requests) == 1:
+                return httpx.Response(
+                    302,
+                    headers={"location": "http://redirect.example/path"},
+                    request=request,
+                )
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/plain"},
+                text="redirected content",
+                request=request,
+            )
+
+        transport = self.RecordingTransport(response_factory)
+        handler = await self._get_web_fetch_handler(monkeypatch, transport)
+
+        result = json.loads(await handler("http://public.example/start"))
+
+        assert result["text"] == "redirected content"
+        assert [request.url.host for request in transport.requests] == [
+            "93.184.216.34",
+            "93.184.216.35",
+        ]
+        assert resolver.call_count == 2
 
     @pytest.mark.asyncio
     async def test_web_fetch_has_ssrf_protection_comment(self):
-        """Test that web_fetch has SSRF protection documentation"""
+        """Test that web_fetch continues to document SSRF protection."""
         import inspect
         from app.main import handle_media_stream
 
