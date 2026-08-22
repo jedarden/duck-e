@@ -2,7 +2,7 @@
 
 # Unit + mock tests (no live credentials needed)
 test:
-	pytest tests/ --ignore=tests/security --ignore=tests/integration/test_rate_limiting_integration.py -q
+	pytest tests/ --ignore=tests/security -q
 
 # Live smoke tests against the VPN endpoint (requires VPN access).
 # Tests every tool handler and session init without a browser or microphone.
