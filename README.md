@@ -133,3 +133,9 @@ DUCK-E ships with 11 voices from the OpenAI Realtime API. Switch any time via th
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+---
+
+Part of [jedarden.com](https://jedarden.com) · Read the write-up: [jedarden.com/projects/ducke/](https://jedarden.com/projects/ducke/)
+
+*This GitHub repo is a read-only mirror of git.ardenone.com/jedarden/duck-e — issues and PRs are welcome here either way.*
