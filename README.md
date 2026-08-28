@@ -1,6 +1,6 @@
-# DUCK-E: The Duck That Talks Back
+# DUCK-E
 
-**DUCK-E** (Digitally Unified Conversational Knowledge Engine) is an AI-powered voice assistant inspired by rubber duck debugging. Instead of explaining your problem to a silent rubber duck, DUCK-E listens and talks back — asking questions, offering suggestions, and searching the web in real time.
+**DUCK-E** (Digitally Unified Conversational Knowledge Engine) is a browser-based voice assistant for rubber-duck debugging: you explain a problem out loud and it answers, asks questions, and can look things up. It is a FastAPI service that brokers a WebRTC session between the browser and the OpenAI Realtime API, plus a small set of server-side tools (weather, web search, URL fetch, per-user memory, voice switching). The backend is a custom `RealtimeSession` class; an earlier AG2/AutoGen dependency was removed and only the `ag2.init` client message name remains for compatibility.
 
 ## How it works
 
@@ -17,9 +17,10 @@ Browser (WebRTC) → WebSocket → FastAPI → OpenAI Realtime API
 ## Features
 
 ### Voice I/O
-- Low-latency, full-duplex voice conversation via the OpenAI Realtime API
-- 11 built-in voices — changeable mid-session without reconnecting
-- Interruption-friendly: DUCK-E handles natural conversation flow
+- Full-duplex voice conversation over WebRTC via the OpenAI Realtime API
+- 11 voices (the Realtime API's set) — changeable mid-session via `session.update`, no reconnect
+- Responses can be interrupted mid-sentence; the client finalizes the cut-off transcript
+- Optional push-to-talk mode (hold a button or the spacebar) instead of an always-open microphone
 
 ### Tools
 | Tool | What it does |
