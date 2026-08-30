@@ -2,6 +2,8 @@
 
 **DUCK-E** (Digitally Unified Conversational Knowledge Engine) is a browser-based voice assistant for rubber-duck debugging: you explain a problem out loud and it answers, asks questions, and can look things up. It is a FastAPI service that brokers a WebRTC session between the browser and the OpenAI Realtime API, plus a small set of server-side tools (weather, web search, URL fetch, per-user memory, voice switching). The backend is a custom `RealtimeSession` class; an earlier AG2/AutoGen dependency was removed and only the `ag2.init` client message name remains for compatibility.
 
+**Live demo:** [ducke-demo.ardenone.com](https://ducke-demo.ardenone.com)
+
 ## How it works
 
 ```
@@ -56,30 +58,15 @@ Memory is silently disabled in local dev when neither authentication method is a
 
 ## Quick start
 
-### Docker (fastest)
+### Docker Compose (builds locally)
 
 ```bash
-docker run -d \
-  -p 8000:8000 \
-  -e OPENAI_API_KEY=sk-... \
-  ronaldraygun/duck-e:latest
+cp .env.example .env
+# Add OPENAI_API_KEY to .env, then:
+docker compose up --build -d
 ```
 
 Open `http://localhost:8000` and start talking.
-
-### Docker Compose
-
-Create a `.env` file:
-
-```
-OPENAI_API_KEY=sk-...
-```
-
-Then run:
-
-```bash
-docker-compose up -d
-```
 
 ### Local development
 
