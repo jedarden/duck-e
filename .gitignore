@@ -96,3 +96,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# NEEDLE execution traces are local diagnostics.
+**/.beads/traces/
