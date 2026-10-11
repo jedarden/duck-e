@@ -561,14 +561,14 @@ class TestCORSConfiguration:
 
         # Should raise error or warn if trying to use * with credentials
         with pytest.raises(ValueError):
-            configure_cors(app, allow_origins=["*"], allow_credentials=True)
+            configure_cors(app, allowed_origins=["*"], allow_credentials=True)
 
     def test_cors_origin_validation(self):
         """Test that CORS validates origins properly"""
         from app.middleware.cors_config import configure_cors
 
         app = FastAPI()
-        configure_cors(app, allow_origins=["https://trusted.com"])
+        configure_cors(app, allowed_origins=["https://trusted.com"])
 
         client = TestClient(app)
 

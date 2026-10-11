@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 LARGE_RESPONSE_PATH = "/__security_regression__/large-response"
 RATE_LIMIT_ERROR_PATH = "/__security_regression__/rate-limit-error"
+UNHANDLED_ERROR_PATH = "/__security_regression__/unhandled-error"
 
 
 @pytest.fixture(scope="module")
@@ -45,6 +46,18 @@ def production_app():
         app.add_api_route(
             RATE_LIMIT_ERROR_PATH,
             rate_limit_error,
+            methods=["GET"],
+            include_in_schema=False,
+        )
+
+    if UNHANDLED_ERROR_PATH not in existing_paths:
+
+        async def unhandled_error():
+            raise RuntimeError("database password=test-secret at /tmp/private.py:123")
+
+        app.add_api_route(
+            UNHANDLED_ERROR_PATH,
+            unhandled_error,
             methods=["GET"],
             include_in_schema=False,
         )
@@ -153,8 +166,11 @@ def test_production_app_adds_security_headers_on_https(production_app):
     assert response.headers["strict-transport-security"].startswith("max-age=")
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["x-xss-protection"] == "1; mode=block"
     assert "content-security-policy" in response.headers
     assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert "permissions-policy" in response.headers
+    assert "max-age=31536000" in response.headers["strict-transport-security"]
 
 
 def test_production_app_applies_configured_cors(client, production_app):
@@ -162,39 +178,46 @@ def test_production_app_applies_configured_cors(client, production_app):
 
     cors = next(item for item in production_app.user_middleware if item.cls is CORSMiddleware)
     configured_origins = cors.kwargs["allow_origins"]
-    origin = next(
-        (value for value in configured_origins if value != "*"),
-        "https://cors-regression.example",
-    )
-    response = client.options(
+    if configured_origins:
+        assert "*" not in configured_origins
+        origin = configured_origins[0]
+        response = client.options(
+            "/status",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == origin
+        assert response.headers["access-control-allow-credentials"] == "true"
+
+    denied = client.options(
         "/status",
         headers={
-            "Origin": origin,
+            "Origin": "https://unapproved-cors-regression.example",
             "Access-Control-Request-Method": "GET",
         },
     )
-
-    assert response.status_code == 200
-    if configured_origins:
-        assert response.headers["access-control-allow-origin"] == origin
-        assert response.headers["access-control-allow-credentials"] == "true"
-    else:
-        assert "access-control-allow-origin" not in response.headers
+    assert denied.status_code == 400
+    assert "access-control-allow-origin" not in denied.headers
 
 
 def test_production_app_rejects_unapproved_websocket_origin(client, monkeypatch):
     from app.main import websocket_connection_limiter, ws_security
+    from starlette.websockets import WebSocketDisconnect
 
     monkeypatch.setattr(ws_security.validator, "allowed_origins", ["http://localhost:8000"])
     acquire = AsyncMock()
     monkeypatch.setattr(websocket_connection_limiter, "acquire", acquire)
 
-    with pytest.raises(Exception):
+    with pytest.raises(WebSocketDisconnect) as disconnect:
         with client.websocket_connect(
             "/session", headers={"Origin": "https://evil.example"}
         ):
             pass
 
+    assert disconnect.value.code == 1008
     acquire.assert_not_awaited()
 
 
@@ -218,6 +241,20 @@ def test_production_app_returns_documented_rate_limit_error_contract(client):
         "endpoint": RATE_LIMIT_ERROR_PATH,
         "limit": "5/minute",
     }
+
+
+def test_production_app_sanitizes_unhandled_errors(client):
+    response = client.get(UNHANDLED_ERROR_PATH)
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "error": True,
+        "status_code": 500,
+        "message": "Internal server error",
+    }
+    assert b"test-secret" not in response.content
+    assert b"private.py" not in response.content
+    assert response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_weather_tool_sanitizes_upstream_response_through_production_websocket(

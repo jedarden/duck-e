@@ -12,8 +12,9 @@ import re
 import logging
 import traceback
 from typing import Dict, Any
-from fastapi import Request, Response
+from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -202,16 +203,16 @@ class SafeErrorHandler:
         return client_host
 
 
-class GlobalExceptionHandler:
+class GlobalExceptionHandler(BaseHTTPMiddleware):
     """
     Global exception handler middleware for FastAPI
     """
 
     def __init__(self, app, debug_mode: bool = False):
-        self.app = app
+        super().__init__(app)
         self.error_handler = SafeErrorHandler(debug_mode=debug_mode)
 
-    async def __call__(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next):
         """
         Middleware handler
         """

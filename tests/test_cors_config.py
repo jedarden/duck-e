@@ -1,7 +1,6 @@
 """
 Unit tests for CORS configuration.
 """
-import os
 import pytest
 from app.middleware import CORSConfig, get_cors_config
 
@@ -39,11 +38,16 @@ class TestCORSConfig:
         assert "https://app.example.com" in config.allowed_origins
         assert len(config.allowed_origins) == 2
 
-    def test_wildcard_origin(self):
-        """Test wildcard origin configuration."""
-        config = CORSConfig(allowed_origins="*")
+    def test_wildcard_origin_without_credentials(self):
+        """Wildcard origins remain available only without credentials."""
+        config = CORSConfig(allowed_origins="*", allow_credentials=False)
 
         assert config.allowed_origins == ["*"]
+
+    def test_wildcard_origin_rejected_with_credentials(self):
+        """Credentials cannot be sent to arbitrary origins."""
+        with pytest.raises(ValueError, match="cannot be used with credentials"):
+            CORSConfig(allowed_origins="*", allow_credentials=True)
 
     def test_direct_list_origins(self):
         """Test direct list of origins."""
@@ -60,8 +64,8 @@ class TestCORSConfig:
         assert config.is_origin_allowed("https://other.com") is False
 
     def test_origin_allowed_wildcard(self):
-        """Test wildcard origin matching."""
-        config = CORSConfig(allowed_origins=["*"])
+        """Test wildcard origin matching without credential support."""
+        config = CORSConfig(allowed_origins=["*"], allow_credentials=False)
 
         assert config.is_origin_allowed("https://example.com") is True
         assert config.is_origin_allowed("https://any.com") is True

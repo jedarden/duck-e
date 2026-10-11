@@ -42,6 +42,8 @@ class CORSConfig:
         """
         self.allowed_origins = self._parse_origins(allowed_origins)
         self.allow_credentials = allow_credentials
+        if "*" in self.allowed_origins and self.allow_credentials:
+            raise ValueError("Wildcard CORS origins cannot be used with credentials")
         self.allow_methods = allow_methods or ["GET", "POST", "OPTIONS"]
         self.allow_headers = allow_headers or ["*"]
         self.expose_headers = expose_headers or []

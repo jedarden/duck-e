@@ -32,6 +32,7 @@ from app.middleware.request_limits import (
     ResponseSizeLimitMiddleware,
 )
 from app.middleware.xml_protection import XMLProtectionMiddleware
+from app.security.error_handler import GlobalExceptionHandler
 from app.middleware.auth import (
     extract_bearer_token,
     extract_websocket_token,
@@ -273,6 +274,7 @@ app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 # Add middleware from the innermost control outward. Request and response
 # limits protect the app itself; CORS and security headers wrap their rejection
 # responses as well as normal route responses.
+app.add_middleware(GlobalExceptionHandler, debug_mode=False)
 app.add_middleware(CostProtectionMiddleware)
 app.add_middleware(XMLProtectionMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware, max_size_mb=1.0, max_json_depth=50)
