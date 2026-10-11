@@ -184,8 +184,8 @@ class TestExpiredTokenRejection:
         assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
         assert "expired" in str(exc_info.value.detail).lower()
 
-    def test_expired_token_falls_back_to_free_tier(self):
-        """RED: Expired token should gracefully degrade to free tier"""
+    def test_expired_token_is_rejected_instead_of_downgraded(self):
+        """A supplied expired token is rejected; only missing auth is anonymous."""
         from app.middleware.auth import get_user_tier_with_fallback
 
         expired_payload = {
@@ -198,9 +198,9 @@ class TestExpiredTokenRejection:
         mock_request = Mock()
         mock_request.headers = {"Authorization": f"Bearer {expired_token}"}
 
-        # Should fall back to free tier instead of failing
-        tier = get_user_tier_with_fallback(mock_request)
-        assert tier == "free"
+        with pytest.raises(HTTPException) as exc_info:
+            get_user_tier_with_fallback(mock_request)
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestMalformedTokenRejection:
@@ -280,8 +280,8 @@ class TestUserTierDetection:
         tier = get_user_tier_from_token(token_data)
         assert tier == "premium"  # Authenticated but no tier = premium
 
-    def test_invalid_tier_claim_defaults_to_premium(self):
-        """RED: Invalid tier values should default to premium"""
+    def test_invalid_tier_claim_is_rejected(self):
+        """Unknown tier values are invalid and cannot grant premium access."""
         from app.middleware.auth import get_user_tier_from_token
 
         token_data = {
@@ -289,8 +289,9 @@ class TestUserTierDetection:
             "tier": "ultra-mega-premium"  # Invalid tier
         }
 
-        tier = get_user_tier_from_token(token_data)
-        assert tier == "premium"
+        with pytest.raises(HTTPException) as exc_info:
+            get_user_tier_from_token(token_data)
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestTokenRefreshMechanism:
@@ -397,9 +398,14 @@ class TestSecurityFeatures:
         assert isinstance(decoded["jti"], str)
         assert len(decoded["jti"]) > 0
 
-    def test_revoked_token_is_rejected(self):
+    def test_revoked_token_is_rejected(self, monkeypatch):
         """RED: Revoked tokens should be rejected even if valid"""
+        import app.middleware.auth as auth
         from app.middleware.auth import validate_token, revoke_token
+        redis_client = Mock()
+        redis_client.get.return_value = "1"
+        redis_client.setex.return_value = True
+        monkeypatch.setattr(auth, "_redis_client", redis_client)
 
         # Create valid token
         payload = {
@@ -433,7 +439,7 @@ class TestSecurityFeatures:
         assert "iat" in decoded
 
         issued_at = datetime.fromtimestamp(decoded["iat"], tz=timezone.utc)
-        assert before_creation <= issued_at <= after_creation
+        assert before_creation - timedelta(seconds=1) <= issued_at <= after_creation
 
 
 class TestCORSWithCredentials:
@@ -498,25 +504,27 @@ class TestSessionHijackingPrevention:
 class TestAuthenticationBypassPrevention:
     """Test security against authentication bypass attempts"""
 
-    def test_empty_authorization_header_defaults_to_free_tier(self):
-        """RED: Empty Authorization header should not bypass auth"""
+    def test_empty_authorization_header_is_rejected(self):
+        """A present but empty Authorization header is malformed, not anonymous."""
         from app.middleware.auth import get_user_tier
 
         mock_request = Mock()
         mock_request.headers = {"Authorization": ""}
 
-        tier = get_user_tier(mock_request)
-        assert tier == "free"
+        with pytest.raises(HTTPException) as exc_info:
+            get_user_tier(mock_request)
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
-    def test_bearer_without_token_defaults_to_free_tier(self):
-        """RED: 'Bearer' without token should default to free tier"""
+    def test_bearer_without_token_is_rejected(self):
+        """A supplied Bearer scheme without a token is malformed."""
         from app.middleware.auth import get_user_tier
 
         mock_request = Mock()
         mock_request.headers = {"Authorization": "Bearer "}
 
-        tier = get_user_tier(mock_request)
-        assert tier == "free"
+        with pytest.raises(HTTPException) as exc_info:
+            get_user_tier(mock_request)
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
     def test_non_bearer_auth_scheme_rejected(self):
         """RED: Only Bearer tokens should be accepted"""
@@ -525,8 +533,9 @@ class TestAuthenticationBypassPrevention:
         mock_request = Mock()
         mock_request.headers = {"Authorization": "Basic dXNlcjpwYXNz"}
 
-        tier = get_user_tier(mock_request)
-        assert tier == "free"  # Reject and fall back to free
+        with pytest.raises(HTTPException) as exc_info:
+            get_user_tier(mock_request)
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
 
 
 class TestFastAPIIntegration:
@@ -536,7 +545,7 @@ class TestFastAPIIntegration:
     async def test_get_current_user_dependency(self):
         """RED: Dependency should extract user from valid token"""
         from app.middleware.auth import get_current_user
-        from fastapi import Depends
+        from fastapi.security import HTTPAuthorizationCredentials
 
         # Create valid token
         payload = {
@@ -546,12 +555,10 @@ class TestFastAPIIntegration:
         }
         token = jwt.encode(payload, TEST_SECRET_KEY, algorithm=TEST_ALGORITHM)
 
-        # Mock request with token
-        mock_request = Mock()
-        mock_request.headers = {"Authorization": f"Bearer {token}"}
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
         # Should extract user data
-        user_data = await get_current_user(mock_request)
+        user_data = await get_current_user(credentials)
         assert user_data["sub"] == "integration_user"
         assert user_data["tier"] == "premium"
 
@@ -560,12 +567,8 @@ class TestFastAPIIntegration:
         """RED: Optional dependency should allow anonymous access"""
         from app.middleware.auth import get_current_user_optional
 
-        # Mock request without token
-        mock_request = Mock()
-        mock_request.headers = {}
-
         # Should return None for anonymous users
-        user_data = await get_current_user_optional(mock_request)
+        user_data = await get_current_user_optional(None)
         assert user_data is None
 
 

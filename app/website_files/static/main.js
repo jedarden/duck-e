@@ -321,15 +321,12 @@ const handleLogout = () => {
   }
 };
 
-// Get WebSocket URL with auth headers
+// Browser WebSockets cannot send custom Authorization headers, so the access
+// JWT is carried in the token query parameter for the handshake.
 const getWebSocketUrl = () => {
   const url = new URL(socketUrl);
 
-  // Add OAuth token if available
   if (oauthToken) {
-    // We'll pass the token via WebSocket subprotocol or query param
-    // For now, we'll pass it as a query parameter (less secure but functional)
-    // In production, you'd want to pass it via WebSocket subprotocols
     url.searchParams.set('token', oauthToken);
   }
 

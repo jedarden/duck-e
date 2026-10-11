@@ -4,8 +4,8 @@ Implements London School TDD: behavior-driven with mock collaborators
 
 Design:
 - Anonymous users = free tier (default)
-- JWT authenticated = premium/enterprise tier
-- Graceful degradation on token failures
+- A supplied JWT must be valid or authentication is rejected
+- Valid access JWTs select a validated tier
 - Token revocation support via Redis
 """
 from fastapi import Request, HTTPException, status, Depends
@@ -83,6 +83,48 @@ if REDIS_URL:
 
 # HTTPBearer for optional authentication
 security = HTTPBearer(auto_error=False)
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"}
+    )
+
+
+def extract_bearer_token(authorization_header: Optional[str]) -> Optional[str]:
+    """Parse an optional Bearer header; a present malformed header is an error."""
+    if authorization_header is None:
+        return None
+
+    parts = authorization_header.strip().split()
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+        raise _unauthorized("Malformed Authorization header")
+    return parts[1]
+
+
+def extract_websocket_token(
+    authorization_header: Optional[str],
+    query_token: Optional[str]
+) -> Optional[str]:
+    """Extract a WebSocket JWT from one supported transport only.
+
+    Browser WebSocket clients pass ``?token=...`` because the browser API does
+    not allow setting an Authorization header. Other clients should use the
+    standard Bearer header. Supplying both is ambiguous and rejected.
+    """
+    bearer_token = extract_bearer_token(authorization_header)
+    if bearer_token is not None and query_token is not None:
+        raise _unauthorized("Use one JWT transport per WebSocket connection")
+
+    if query_token is not None:
+        token = query_token.strip()
+        if not token:
+            raise _unauthorized("JWT token must not be empty")
+        return token
+
+    return bearer_token
 
 
 def create_access_token(
@@ -199,14 +241,25 @@ def validate_token(token: str) -> Dict[str, Any]:
             algorithms=[JWT_ALGORITHM]
         )
 
-        # Verify required claims
-        if "sub" not in payload:
+        # Require a subject and an explicit expiry. python-jose checks an
+        # existing exp claim, but does not require one by default.
+        subject = payload.get("sub")
+        if not isinstance(subject, str) or not subject.strip():
             logger.warning("Token missing 'sub' claim")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token: missing subject claim",
-                headers={"WWW-Authenticate": "Bearer"}
-            )
+            raise _unauthorized("Invalid token: missing subject claim")
+
+        expiration = payload.get("exp")
+        if not isinstance(expiration, (int, float)) or isinstance(expiration, bool):
+            logger.warning("Token missing a valid 'exp' claim")
+            raise _unauthorized("Invalid token: missing or invalid expiration claim")
+
+        token_type = payload.get("token_type", "access")
+        if token_type not in ("access", "refresh"):
+            logger.warning("Token has an unsupported token type")
+            raise _unauthorized("Invalid token type")
+
+        # Validate tier claims before any caller can grant tier-specific access.
+        get_user_tier_from_token(payload)
 
         # Check if token is revoked (if Redis available)
         if _redis_client and "jti" in payload:
@@ -232,13 +285,18 @@ def validate_token(token: str) -> Dict[str, Any]:
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"}
         )
-    except jwt.JWTError as e:
+    except (jwt.JWTError, TypeError, ValueError) as e:
         logger.warning(f"Invalid token: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token signature or format",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
+        raise _unauthorized("Invalid token signature or format")
+
+
+def validate_access_token(token: str) -> Dict[str, Any]:
+    """Validate a JWT specifically for use as an API access credential."""
+    payload = validate_token(token)
+    if payload.get("token_type", "access") != "access":
+        logger.warning("Non-access token used for authentication")
+        raise _unauthorized("Invalid token type for authentication")
+    return payload
 
 
 def refresh_access_token(refresh_token: str) -> str:
@@ -307,14 +365,16 @@ def get_user_tier_from_token(token_data: Dict[str, Any]) -> UserTier:
     Returns:
         UserTier enum value
     """
-    tier_str = token_data.get("tier", "premium")
+    # Keep compatibility with previously-issued signed tokens that omitted
+    # tier; explicit unknown values are invalid and must not gain premium access.
+    tier_str = token_data.get("tier", UserTier.PREMIUM.value)
 
     # Validate tier value
     try:
         return UserTier(tier_str)
-    except ValueError:
-        logger.warning(f"Invalid tier in token: {tier_str}, defaulting to premium")
-        return UserTier.PREMIUM
+    except (TypeError, ValueError):
+        logger.warning("Invalid tier claim in token")
+        raise _unauthorized("Invalid token: unsupported tier")
 
 
 def get_tier_limits(tier: str) -> Dict[str, Any]:
@@ -365,7 +425,7 @@ def get_rate_limit_for_tier(tier: str) -> str:
 
 def get_user_tier(request: Request) -> str:
     """
-    Get user tier from request (with graceful fallback to free tier)
+    Get user tier from request (anonymous requests use the free tier)
 
     Args:
         request: FastAPI request object
@@ -373,43 +433,27 @@ def get_user_tier(request: Request) -> str:
     Returns:
         Tier string (free/premium/enterprise)
     """
-    # Extract Authorization header
-    auth_header = request.headers.get("Authorization", "")
-
-    # No header or empty = free tier
-    if not auth_header or not auth_header.strip():
+    # No credential means anonymous free-tier access. A supplied but malformed
+    # or invalid credential is rejected instead of silently downgraded.
+    auth_header = request.headers.get("Authorization")
+    if auth_header is None:
         return UserTier.FREE.value
 
-    # Parse Bearer token
-    parts = auth_header.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        logger.debug("Invalid authorization header format")
-        return UserTier.FREE.value
-
-    token = parts[1]
-    if not token or not token.strip():
-        return UserTier.FREE.value
-
-    # Try to validate token
-    try:
-        payload = validate_token(token)
-        tier = get_user_tier_from_token(payload)
-        return tier.value
-    except HTTPException:
-        # Invalid/expired token = gracefully fall back to free tier
-        logger.debug("Token validation failed, falling back to free tier")
-        return UserTier.FREE.value
+    token = extract_bearer_token(auth_header)
+    assert token is not None  # a present, well-formed Bearer header has a token
+    payload = validate_access_token(token)
+    return get_user_tier_from_token(payload).value
 
 
 def get_user_tier_with_fallback(request: Request) -> str:
     """
-    Get user tier with explicit fallback handling (alias for get_user_tier)
+    Get the tier, defaulting to free only when no credential was supplied.
 
     Args:
         request: FastAPI request object
 
     Returns:
-        Tier string, never raises exception
+        Tier string; invalid supplied credentials raise HTTP 401
     """
     return get_user_tier(request)
 
@@ -455,7 +499,7 @@ def validate_token_with_binding(token: str, user_agent: str) -> Dict[str, Any]:
     Raises:
         HTTPException: 401 if user agent doesn't match
     """
-    payload = validate_token(token)
+    payload = validate_access_token(token)
 
     # Check user agent hash
     if "ua_hash" in payload:
@@ -510,7 +554,7 @@ def validate_token_with_ip(token: str, client_ip: str) -> Dict[str, Any]:
     Raises:
         HTTPException: 401 if IP doesn't match
     """
-    payload = validate_token(token)
+    payload = validate_access_token(token)
 
     # Check IP hash
     if "ip_hash" in payload:
@@ -551,7 +595,7 @@ async def get_current_user(
         )
 
     token = credentials.credentials
-    return validate_token(token)
+    return validate_access_token(token)
 
 
 async def get_current_user_optional(
@@ -569,12 +613,7 @@ async def get_current_user_optional(
     if not credentials:
         return None
 
-    try:
-        token = credentials.credentials
-        return validate_token(token)
-    except HTTPException:
-        # Invalid token = anonymous user
-        return None
+    return validate_access_token(credentials.credentials)
 
 
 class JWTAuthMiddleware:

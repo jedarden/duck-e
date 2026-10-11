@@ -127,7 +127,7 @@ class WebSocketOriginValidator:
                 "WebSocket connection rejected: Missing Origin header",
                 extra={
                     "client": websocket.client,
-                    "headers": dict(websocket.headers)
+                    "header_names": [name.lower() for name in websocket.headers.keys()]
                 }
             )
             return False

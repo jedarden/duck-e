@@ -17,6 +17,7 @@ from jose import jwt
 from app.middleware.auth import (
     create_access_token,
     create_refresh_token,
+    validate_access_token,
     JWT_SECRET_KEY,
     JWT_ALGORITHM
 )
@@ -371,15 +372,9 @@ def get_user_info_from_token(token: str) -> Optional[Dict[str, Any]]:
     """
     try:
         # Fail closed: refuse to validate tokens if using default secret
-        if not JWT_SECRET_KEY or JWT_SECRET_KEY == "your-secret-key-here-change-in-production":
-            logger.warning("SECURITY: Rejecting token validation - default JWT secret in use")
-            return None
-
-        payload = jwt.decode(
-            token,
-            JWT_SECRET_KEY,
-            algorithms=[JWT_ALGORITHM]
-        )
+        # Use the shared validator so OAuth and tiered API auth have identical
+        # signature, expiry, subject, token-type, and tier rules.
+        payload = validate_access_token(token)
 
         # Check if this is an OAuth-authenticated token
         if payload.get("auth_method") != "google_oauth":
@@ -394,8 +389,8 @@ def get_user_info_from_token(token: str) -> Optional[Dict[str, Any]]:
             "google_id": payload.get("google_id")
         }
 
-    except jwt.JWTError as e:
-        logger.error(f"Error decoding JWT token: {e}")
+    except (HTTPException, jwt.JWTError) as e:
+        logger.error(f"Error validating JWT token: {e}")
         return None
 
 

@@ -130,6 +130,10 @@ def get_user_tier_from_request(request: Request) -> str:
         # Auth module not available, default to free tier
         logger.debug("Auth module not available, defaulting to free tier")
         return "free"
+    except HTTPException:
+        # A supplied invalid JWT is an authentication failure, not anonymous
+        # free-tier access. Let FastAPI render the 401 response.
+        raise
     except Exception as e:
         # Any other error, default to free tier
         logger.warning(f"Error getting user tier: {e}, defaulting to free tier")

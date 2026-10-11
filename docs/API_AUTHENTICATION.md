@@ -7,7 +7,7 @@ DUCK-E implements **optional JWT-based authentication** with tiered access level
 ## Authentication Design Principles
 
 1. **Optional Authentication**: API works without authentication (free tier)
-2. **Graceful Degradation**: Invalid/expired tokens fall back to free tier
+2. **Anonymous Access**: Requests without a credential use free-tier access; supplied invalid credentials are rejected
 3. **No Breaking Changes**: Existing anonymous users continue working
 4. **Tier-Based Access**: Premium/Enterprise tiers unlock higher limits
 
@@ -33,7 +33,7 @@ GET /status
 **Requires valid JWT token**
 
 ```http
-GET /status
+GET /auth/me
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
@@ -48,7 +48,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 **Requires JWT with `tier: "enterprise"` claim**
 
 ```http
-GET /status
+GET /auth/me
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
@@ -58,7 +58,17 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 - **Session Timeout**: 8 hours
 - **Concurrent Connections**: 20
 
-## JWT Token Structure
+## JWT Token Contract
+
+An access JWT must be signed with the configured algorithm and contain a
+non-empty `sub` and a numeric `exp` (Unix NumericDate). The token is invalid
+once `exp` is reached; there is no expiry grace period. If present,
+`token_type` must be `access` (refresh tokens are never API credentials).
+
+`tier` must be exactly `free`, `premium`, or `enterprise`. A signed legacy
+token with no `tier` claim is treated as `premium`; an explicit unknown or
+malformed tier is rejected with 401. The signature issuer is responsible for
+assigning tiers correctly.
 
 ### Access Token (2 hours)
 
@@ -119,35 +129,33 @@ token = jwt.encode(payload, secret_key, algorithm="HS256")
 # Anonymous (free tier)
 curl https://api.ducke.io/status
 
-# Authenticated (premium/enterprise tier)
-curl https://api.ducke.io/status \
+# Validate an authenticated access token and read its tier
+curl https://api.ducke.io/auth/me \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
 #### WebSocket Connections
 
+The browser WebSocket API cannot set an `Authorization` header. Browser clients
+pass the access token as the `token` query parameter during the handshake.
+Because query strings can be captured by proxy/access logs, use `wss://`, keep
+access tokens short-lived, and configure every proxy and access log to redact
+the `token` query value. DUCK-E application logs record auth header names only
+and do not log the token query value. Do not send a JWT in a WebSocket message
+after connecting.
+
 ```javascript
 // JavaScript/Browser
-const ws = new WebSocket('wss://api.ducke.io/session');
-
-// After connection opens, send auth token
-ws.onopen = () => {
-  ws.send(JSON.stringify({
-    type: 'auth',
-    token: 'YOUR_JWT_TOKEN'
-  }));
-};
+const url = new URL('wss://api.ducke.io/session');
+url.searchParams.set('token', accessToken);
+const ws = new WebSocket(url);
 ```
 
-Alternatively, pass token in connection header:
-
-```javascript
-const ws = new WebSocket('wss://api.ducke.io/session', {
-  headers: {
-    'Authorization': 'Bearer YOUR_JWT_TOKEN'
-  }
-});
-```
+Non-browser WebSocket clients may instead send the standard
+`Authorization: Bearer <access JWT>` handshake header. A connection must use
+one transport only; sending both is rejected. A missing credential is an
+anonymous free-tier session. A supplied invalid or expired JWT closes the
+WebSocket with policy-violation code `1008` before a session starts.
 
 ### 3. Token Refresh
 
@@ -175,22 +183,18 @@ curl -X POST https://your-auth-service.com/auth/refresh \
 
 ### 401 Unauthorized
 
-**Invalid or expired token** - Falls back to free tier
+**Invalid or expired token** - Rejected. Anonymous free-tier access applies only when no credential is supplied.
 
 ```json
 {
-  "detail": "Token has expired",
-  "status_code": 401,
-  "headers": {
-    "WWW-Authenticate": "Bearer"
-  }
+  "detail": "Token has expired"
 }
 ```
 
-**DUCK-E Behavior**:
-- Token validation fails silently
-- User automatically downgraded to free tier
-- Service continues to work with free tier limits
+The HTTP response also includes `WWW-Authenticate: Bearer`. Public endpoints
+without a token remain available anonymously. If a token is supplied to an
+optional-auth endpoint, malformed, expired, revoked, non-access, or
+unsupported-tier tokens return 401 instead of silently downgrading.
 
 ### 429 Rate Limit Exceeded
 
@@ -442,10 +446,10 @@ print(jwt.encode(payload, 'test-secret', algorithm='HS256'))
 curl https://api.ducke.io/status
 
 # 3. Test authenticated access (premium tier)
-curl https://api.ducke.io/status \
+curl https://api.ducke.io/auth/me \
   -H "Authorization: Bearer $TEST_TOKEN"
 
-# 4. Test expired token (should fall back to free tier)
+# 4. Test expired token (should be rejected with HTTP 401)
 export EXPIRED_TOKEN=$(python -c "
 from jose import jwt
 from datetime import datetime, timedelta
@@ -457,9 +461,13 @@ payload = {
 print(jwt.encode(payload, 'test-secret', algorithm='HS256'))
 ")
 
-curl https://api.ducke.io/status \
+curl https://api.ducke.io/auth/me \
   -H "Authorization: Bearer $EXPIRED_TOKEN"
 ```
+
+For a route that requires authentication (such as `/auth/me`), the expired
+token returns 401. Public routes without a token continue to use free-tier
+access.
 
 ### Automated Testing
 
@@ -479,7 +487,10 @@ See `/tests/security/test_authentication.py` for comprehensive test suite coveri
 
 ### Q: What happens if my token expires?
 
-**A**: DUCK-E gracefully downgrades you to free tier. No errors or service disruption. Refresh your token to restore premium access.
+**A**: A request with the expired token receives HTTP 401; a WebSocket
+connection with it closes using code 1008. Refresh the access token through
+your auth service, then retry. A request with no token still uses free-tier
+access.
 
 ### Q: Can I use API keys instead of JWT?
 
@@ -514,6 +525,6 @@ For issues or questions:
 
 ---
 
-**Last Updated**: 2025-10-10
+**Last Updated**: 2026-10-11
 **API Version**: 1.0.0
 **Authentication**: Optional JWT Bearer

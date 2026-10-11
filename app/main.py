@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -27,6 +27,12 @@ from app.middleware import (
     configure_cors,
     get_websocket_security_middleware
 )
+from app.middleware.auth import (
+    extract_bearer_token,
+    extract_websocket_token,
+    get_user_tier_from_token,
+    validate_access_token,
+)
 
 # Import Google OAuth (optional)
 try:
@@ -35,7 +41,6 @@ try:
         get_oauth_login_url,
         initiate_login,
         handle_callback,
-        get_user_info_from_token,
         cleanup_expired_states,
         cleanup_expired_sessions
     )
@@ -401,25 +406,31 @@ if _oauth_available:
         Validate JWT token and return user information
         Returns user info from valid JWT token or 401 if invalid
         """
-        # Extract Authorization header
-        auth_header = request.headers.get('authorization', '')
-
-        if not auth_header or not auth_header.startswith('Bearer '):
+        auth_header = request.headers.get('authorization')
+        try:
+            token = extract_bearer_token(auth_header)
+            if token is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Authentication required",
+                    headers={"WWW-Authenticate": "Bearer"}
+                )
+            payload = validate_access_token(token)
+        except HTTPException as exc:
             return JSONResponse(
-                status_code=401,
-                content={"error": "No authorization token provided"}
+                status_code=exc.status_code,
+                content={"detail": exc.detail},
+                headers=exc.headers
             )
 
-        token = auth_header[7:]  # Remove 'Bearer ' prefix
-
-        # Validate token and extract user info
-        user_info = get_user_info_from_token(token)
-
-        if not user_info:
-            return JSONResponse(
-                status_code=401,
-                content={"error": "Invalid or expired token"}
-            )
+        user_info = {
+            "email": payload.get("email"),
+            "name": payload.get("name"),
+            "picture": payload.get("picture"),
+            "tier": get_user_tier_from_token(payload).value,
+            "auth_method": payload.get("auth_method"),
+            "google_id": payload.get("google_id")
+        }
 
         return JSONResponse(content={
             "authenticated": True,
@@ -468,55 +479,53 @@ async def handle_media_stream(websocket: WebSocket):
     # Generate unique session ID for cost tracking
     session_id = str(uuid.uuid4())
 
-    # Retrieve and log incoming headers
+    # Retrieve incoming headers without logging credential values.
     headers = websocket.headers
     logger = getLogger("uvicorn.error")
     logger.info(f"Session ID for cost tracking: {session_id}")
 
-    # Log all headers for auth proxy debugging
+    # Log only auth-related header names so credentials and proxy identity
+    # values cannot leak into application logs.
     header_dict = dict(headers)
-    auth_relevant = {k: v for k, v in header_dict.items()
-                     if any(k.lower().startswith(p) for p in ('x-forward', 'x-real', 'cookie', 'authorization'))}
+    auth_relevant = [k.lower() for k in header_dict
+                     if any(k.lower().startswith(p) for p in ('x-forward', 'x-real', 'cookie', 'authorization'))]
     logger.info(json.dumps({"event": "ws.connect", "session_id": session_id,
-                            "auth_headers": auth_relevant, "ts": time.time()}))
+                            "auth_header_names": auth_relevant, "ts": time.time()}))
 
     # Extract user identity from OAuth proxy headers or JWT token
     forwarded_user = headers.get('x-forwarded-user', '')
     forwarded_email = headers.get('x-forwarded-email', '')
     forwarded_name = headers.get('x-forwarded-name', '')
 
-    # Also check for JWT token in Authorization header or query parameter
-    # Browser WebSockets can't send custom headers, so we fall back to query params
-    auth_header = headers.get('authorization', '')
     jwt_user_info = None
-    jwt_token = None
+    query_tokens = websocket.query_params.getlist("token")
+    try:
+        if len(query_tokens) > 1:
+            raise HTTPException(status_code=401, detail="Only one JWT query parameter is allowed")
+        jwt_token = extract_websocket_token(
+            headers.get("authorization"),
+            query_tokens[0] if query_tokens else None
+        )
+        jwt_payload = validate_access_token(jwt_token) if jwt_token is not None else None
+    except HTTPException:
+        logger.warning(json.dumps({"event": "ws.auth_rejected", "session_id": session_id,
+                                   "ts": time.time()}))
+        await websocket.close(code=1008, reason="Invalid or expired JWT")
+        return
 
-    # Try Authorization header first (for reverse proxy auth)
-    if auth_header and auth_header.startswith('Bearer '):
-        jwt_token = auth_header[7:]  # Remove 'Bearer ' prefix
-
-    # Fallback: check query parameter for browser WebSocket connections
-    if not jwt_token:
-        try:
-            from urllib.parse import urlparse, parse_qs
-            ws_url = str(websocket.url)
-            if 'token=' in ws_url:
-                query_params = parse_qs(urlparse(ws_url).query)
-                jwt_token = query_params.get('token', [None])[0]
-        except Exception as e:
-            logger.warning(f"Failed to parse token from query params: {e}")
-
-    # Validate JWT token if present
-    if jwt_token:
-        try:
-            jwt_user_info = get_user_info_from_token(jwt_token) if _oauth_available else None
-            if jwt_user_info:
-                logger.info(json.dumps({"event": "ws.jwt_auth", "session_id": session_id,
-                                       "user_email": jwt_user_info.get("email"),
-                                       "user_name": jwt_user_info.get("name"),
-                                       "ts": time.time()}))
-        except Exception as e:
-            logger.warning(f"Failed to extract user info from JWT: {e}")
+    if jwt_payload is not None:
+        jwt_user_info = {
+            "email": jwt_payload.get("email"),
+            "name": jwt_payload.get("name"),
+            "sub": jwt_payload["sub"],
+            "tier": get_user_tier_from_token(jwt_payload).value,
+            "auth_method": jwt_payload.get("auth_method")
+        }
+        logger.info(json.dumps({"event": "ws.jwt_auth", "session_id": session_id,
+                               "user_email": jwt_user_info.get("email"),
+                               "user_name": jwt_user_info.get("name"),
+                               "tier": jwt_user_info["tier"],
+                               "ts": time.time()}))
 
     # If standard headers are missing, note which auth headers ARE present for debugging
     if not forwarded_user and not forwarded_email and not jwt_user_info:
@@ -531,6 +540,9 @@ async def handle_media_stream(websocket: WebSocket):
     if jwt_user_info and jwt_user_info.get("email"):
         user_identity = jwt_user_info["email"]
         user_display_name = jwt_user_info.get("name", jwt_user_info["email"])
+    elif jwt_user_info and jwt_user_info.get("sub"):
+        user_identity = jwt_user_info["sub"]
+        user_display_name = jwt_user_info.get("name") or user_identity
     elif forwarded_email:
         user_identity = forwarded_email
         user_display_name = forwarded_name or forwarded_email

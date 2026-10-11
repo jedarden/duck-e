@@ -5,6 +5,11 @@ import pytest
 import os
 from typing import Generator
 
+# App modules can be imported while pytest collects tests, before autouse
+# fixtures execute. Provide a test-only key at conftest import time so token
+# issuance is deterministic and never relies on the public default secret.
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-for-jwt-validation-only")  # pragma: allowlist secret
+
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():

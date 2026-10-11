@@ -25,7 +25,20 @@ def set_jwt_secret_key(monkeypatch, request):
     # Check if the test class name contains "DefaultSecretRejection"
     test_class_name = request.node.cls.__name__ if request.node.cls else ""
     if "DefaultSecretRejection" in test_class_name:
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        import importlib
+        if "app.middleware.auth" in sys.modules:
+            importlib.reload(sys.modules["app.middleware.auth"])
+        if "app.middleware.google_oauth" in sys.modules:
+            importlib.reload(sys.modules["app.middleware.google_oauth"])
         yield
+        # Restore the normal test key in module globals as well as the env var;
+        # later integration tests may reuse already-imported app modules.
+        monkeypatch.setenv("JWT_SECRET_KEY", TEST_SECRET_KEY)
+        if "app.middleware.auth" in sys.modules:
+            importlib.reload(sys.modules["app.middleware.auth"])
+        if "app.middleware.google_oauth" in sys.modules:
+            importlib.reload(sys.modules["app.middleware.google_oauth"])
         return
 
     monkeypatch.setenv("JWT_SECRET_KEY", TEST_SECRET_KEY)
