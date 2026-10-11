@@ -73,7 +73,7 @@ Open `http://localhost:8000` and start talking.
 ```bash
 pip install -r requirements.txt
 # create .env with OPENAI_API_KEY=sk-...
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers
 ```
 
 ## Environment variables

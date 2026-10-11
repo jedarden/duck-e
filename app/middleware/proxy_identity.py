@@ -9,11 +9,24 @@ ProxyNetwork = IPv4Network | IPv6Network
 
 def parse_trusted_proxy_sources(sources: str) -> tuple[ProxyNetwork, ...]:
     """Parse comma-separated proxy IPs/CIDRs; invalid configuration fails closed."""
+    if not isinstance(sources, str):
+        raise ValueError("trusted proxy sources must be a string")
+
+    # An empty environment variable means that no proxy is trusted. Once a
+    # value is supplied, however, every comma-separated entry must be valid;
+    # silently dropping an empty entry could hide a broken deployment setting.
+    if not sources.strip():
+        return ()
+
     networks: list[ProxyNetwork] = []
-    for source in sources.split(","):
-        source = source.strip()
-        if source:
+    for raw_source in sources.split(","):
+        source = raw_source.strip()
+        if not source:
+            raise ValueError("trusted proxy sources cannot contain empty entries")
+        try:
             networks.append(ip_network(source, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"invalid trusted proxy source: {source!r}") from exc
     return tuple(networks)
 
 
@@ -22,7 +35,7 @@ def is_trusted_proxy(
     trusted_networks: tuple[ProxyNetwork, ...],
 ) -> bool:
     """Return whether the socket peer belongs to a configured proxy network."""
-    if not peer_host:
+    if not isinstance(peer_host, str) or not peer_host:
         return False
     try:
         peer = ip_address(peer_host)
@@ -37,11 +50,26 @@ def is_trusted_proxy(
 def _single_header(headers: Mapping[str, str], name: str) -> str | None:
     """Read an unambiguous, nonempty identity header value."""
     getlist = getattr(headers, "getlist", None)
-    values = getlist(name) if callable(getlist) else [headers.get(name)]
-    if len(values) != 1 or values[0] is None:
+    if callable(getlist):
+        try:
+            values = list(getlist(name))
+        except (TypeError, ValueError):
+            return None
+    else:
+        # Keep plain mappings case-insensitive like an HTTP header collection,
+        # while treating case-variant duplicates as ambiguous too.
+        values = [
+            value
+            for key, value in headers.items()
+            if isinstance(key, str) and key.casefold() == name.casefold()
+        ]
+
+    if len(values) != 1 or not isinstance(values[0], str):
         return None
     value = values[0].strip()
-    if not value or any(char in value for char in ",\r\n"):
+    if not value or "," in value or any(
+        ord(char) < 0x20 or ord(char) == 0x7F for char in value
+    ):
         return None
     return value
 

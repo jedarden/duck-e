@@ -52,9 +52,27 @@ def test_proxy_identity_requires_the_socket_peer_to_match_a_configured_network()
     assert get_trusted_proxy_identity(spoofed_headers, "10.21.0.1", ()) == (None, None)
 
 
+@pytest.mark.parametrize(
+    "peer_host",
+    [None, 167772161, "10.20.1.2,198.51.100.7", "10.20.1.2:443"],
+    ids=["missing", "non-string", "forwarded-list", "host-and-port"],
+)
+def test_malformed_socket_peer_cannot_authorize_proxy_identity(peer_host):
+    headers = {"x-forwarded-email": "victim@example.com"}
+
+    assert get_trusted_proxy_identity(
+        headers,
+        peer_host,
+        parse_trusted_proxy_sources("10.20.0.0/16"),
+    ) == (None, None)
+
+
 def test_invalid_proxy_source_configuration_is_rejected():
     with pytest.raises(ValueError):
         parse_trusted_proxy_sources("10.0.0.0/8,not-a-network")
+
+    with pytest.raises(ValueError):
+        parse_trusted_proxy_sources("10.0.0.1,")
 
 
 def test_ambiguous_identity_header_is_ignored():
@@ -71,6 +89,21 @@ def test_ambiguous_identity_header_is_ignored():
         "10.20.1.2",
         parse_trusted_proxy_sources("10.20.0.0/16"),
     ) == (None, "person@example.com")
+
+
+@pytest.mark.parametrize(
+    "raw_value",
+    ["first,second", "first\x00second"],
+    ids=["comma-separated", "control-character"],
+)
+def test_malformed_identity_header_value_is_ignored(raw_value):
+    headers = {"X-Forwarded-Email": raw_value}
+
+    assert get_trusted_proxy_identity(
+        headers,
+        "10.20.1.2",
+        parse_trusted_proxy_sources("10.20.0.0/16"),
+    ) == (None, None)
 
 
 def test_jwt_oauth_identity_precedes_trusted_proxy_identity():
