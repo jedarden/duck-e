@@ -36,8 +36,8 @@ Browser (WebRTC) → WebSocket → FastAPI → OpenAI Realtime API
 
 ### Persistent memory
 DUCK-E stores per-user facts with categories, confidence scores, and time decay, and surfaces them at the start of each session. Memory is keyed by user identity via:
-- **Google OAuth** (recommended): Users sign in with Google, memory is keyed to their email
-- **Reverse proxy headers**: Falls back to `x-forwarded-user` / `x-forwarded-email` headers if OAuth is not configured
+- **Validated JWTs** (including Google OAuth): Signed identity claims take precedence and memory is keyed to the JWT email or subject
+- **Reverse proxy headers**: `x-forwarded-email` then `x-forwarded-user` is used only when the socket peer matches an IP or CIDR in `TRUSTED_PROXY_SOURCES`. The proxy must strip client-supplied identity headers before setting authenticated values.
 
 Memory is silently disabled in local dev when neither authentication method is available.
 
@@ -88,6 +88,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `JWT_SECRET_KEY` | No | `your-secret-key-here-change-in-production` | JWT signing secret |
 | `JWT_ALGORITHM` | No | `HS256` | JWT algorithm |
 | `JWT_EXPIRATION_MINUTES` | No | `120` | JWT token expiration time |
+| `TRUSTED_PROXY_SOURCES` | No | empty (trust none) | Comma-separated proxy IP addresses or CIDRs permitted to supply `x-forwarded-user` and `x-forwarded-email` |
 | `RATE_LIMIT_ENABLED` | No | `true` | Toggle per-IP rate limiting |
 | `RATE_LIMIT_WEBSOCKET` | No | `5/minute` | Per-IP WebSocket connection rate |
 | `COST_PROTECTION_ENABLED` | No | `true` | Toggle cost protection |

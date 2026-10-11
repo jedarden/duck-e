@@ -1,5 +1,7 @@
 """Trust-boundary and memory-isolation tests for proxy identities."""
 
+from pathlib import Path
+
 import pytest
 from starlette.datastructures import Headers
 
@@ -9,6 +11,22 @@ from app.middleware.proxy_identity import (
     parse_trusted_proxy_sources,
     resolve_user_identity,
 )
+
+
+@pytest.mark.parametrize(
+    "dockerfile",
+    [
+        Path(__file__).parents[2] / "dockerfile",
+        Path(__file__).parents[2] / "docs/security/dockerfile.hardened",
+    ],
+    ids=["default-image", "hardened-image"],
+)
+def test_dockerfiles_preserve_the_actual_socket_peer_for_proxy_trust(dockerfile):
+    command = dockerfile.read_text()
+
+    assert "--no-proxy-headers" in command
+    assert '"--proxy-headers"' not in command
+    assert '"--forwarded-allow-ips"' not in command
 
 
 def test_proxy_identity_requires_the_socket_peer_to_match_a_configured_network():
