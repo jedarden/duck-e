@@ -609,13 +609,13 @@ class TestMemorySystemIntegration:
             "name": "JWT Test User"
         }
 
-        # Simulate the logic from handle_media_stream (lines 429-437)
-        user_identity = None
-        user_display_name = None
+        from app.middleware.proxy_identity import resolve_user_identity
 
-        if jwt_user_info and jwt_user_info.get("email"):
-            user_identity = jwt_user_info["email"]
-            user_display_name = jwt_user_info.get("name", jwt_user_info["email"])
+        user_identity, user_display_name = resolve_user_identity(
+            jwt_user_info,
+            proxy_user=None,
+            proxy_email=None,
+        )
 
         assert user_identity == "jwt@example.com"
         assert user_display_name == "JWT Test User"
@@ -664,28 +664,25 @@ class TestMemorySystemIntegration:
 
         This test ensures the fix doesn't break the existing header-based path.
         """
-        forwarded_email = test_user_headers["x-forwarded-email"]
-        forwarded_name = test_user_headers["x-forwarded-name"]
-        forwarded_user = test_user_headers["x-forwarded-user"]
+        from app.middleware.proxy_identity import (
+            get_trusted_proxy_identity,
+            parse_trusted_proxy_sources,
+            resolve_user_identity,
+        )
 
-        # Simulate the logic from handle_media_stream (lines 429-437)
-        # without JWT (jwt_user_info is None)
-        jwt_user_info = None
-        user_identity = None
-        user_display_name = None
-
-        if jwt_user_info and jwt_user_info.get("email"):
-            user_identity = jwt_user_info["email"]
-            user_display_name = jwt_user_info.get("name", jwt_user_info["email"])
-        elif forwarded_email:
-            user_identity = forwarded_email
-            user_display_name = forwarded_name or forwarded_email
-        elif forwarded_user:
-            user_identity = forwarded_user
-            user_display_name = forwarded_user
+        proxy_user, proxy_email = get_trusted_proxy_identity(
+            test_user_headers,
+            "10.20.1.2",
+            parse_trusted_proxy_sources("10.20.0.0/16"),
+        )
+        user_identity, user_display_name = resolve_user_identity(
+            None,
+            proxy_user,
+            proxy_email,
+        )
 
         assert user_identity == "test@example.com"
-        assert user_display_name == "Test User"
+        assert user_display_name == "test@example.com"
 
         # Create memory store
         store = UserMemoryStore(user_id=user_identity, memory_dir=memory_dir)
@@ -712,8 +709,9 @@ class TestMemorySystemIntegration:
 
         system_message = base_system + memory_section
 
-        # Verify header-derived name appears
-        assert "Test User" in system_message
+        # Proxy email is trusted for identity; x-forwarded-name is not consumed.
+        assert "The current user is test@example.com" in system_message
+        assert "Test User" not in system_message
         assert "test@example.com" in system_message
 
     @pytest.mark.asyncio
@@ -731,18 +729,13 @@ class TestMemorySystemIntegration:
             "name": "JWT User"
         }
         forwarded_email = "header@example.com"
-        forwarded_name = "Header User"
+        from app.middleware.proxy_identity import resolve_user_identity
 
-        # Simulate the priority logic
-        user_identity = None
-        user_display_name = None
-
-        if jwt_user_info and jwt_user_info.get("email"):
-            user_identity = jwt_user_info["email"]
-            user_display_name = jwt_user_info.get("name", jwt_user_info["email"])
-        elif forwarded_email:
-            user_identity = forwarded_email
-            user_display_name = forwarded_name or forwarded_email
+        user_identity, user_display_name = resolve_user_identity(
+            jwt_user_info,
+            proxy_user="header-user",
+            proxy_email=forwarded_email,
+        )
 
         # JWT should win
         assert user_identity == "jwt@example.com"
@@ -770,13 +763,24 @@ class TestMemorySystemIntegration:
         """
         E2E: User identity is correctly extracted from headers and used for memory.
         """
-        user_email = test_user_headers["x-forwarded-email"]
-        user_name = test_user_headers["x-forwarded-name"]
+        from app.middleware.proxy_identity import (
+            get_trusted_proxy_identity,
+            parse_trusted_proxy_sources,
+            resolve_user_identity,
+        )
 
-        # Simulate what the WebSocket handler does
-        user_identity = user_email or test_user_headers["x-forwarded-user"]
+        proxy_user, proxy_email = get_trusted_proxy_identity(
+            test_user_headers,
+            "10.20.1.2",
+            parse_trusted_proxy_sources("10.20.0.0/16"),
+        )
+        user_identity, _user_display = resolve_user_identity(
+            None,
+            proxy_user,
+            proxy_email,
+        )
 
-        assert user_identity == user_email
+        assert user_identity == test_user_headers["x-forwarded-email"]
 
         # Create memory store with the extracted identity
         store = UserMemoryStore(user_id=user_identity, memory_dir=memory_dir)
@@ -796,12 +800,23 @@ class TestMemorySystemIntegration:
         """
         E2E: When email header is missing, fall back to x-forwarded-user.
         """
-        headers_without_email = {
-            "x-forwarded-user": "user-without-email-123",
-            "x-forwarded-name": "No Email User"
-        }
+        from app.middleware.proxy_identity import (
+            get_trusted_proxy_identity,
+            parse_trusted_proxy_sources,
+            resolve_user_identity,
+        )
 
-        user_identity = headers_without_email.get("x-forwarded-email") or headers_without_email.get("x-forwarded-user")
+        headers_without_email = {"x-forwarded-user": "user-without-email-123"}
+        proxy_user, proxy_email = get_trusted_proxy_identity(
+            headers_without_email,
+            "10.20.1.2",
+            parse_trusted_proxy_sources("10.20.0.0/16"),
+        )
+        user_identity, _user_display = resolve_user_identity(
+            None,
+            proxy_user,
+            proxy_email,
+        )
 
         assert user_identity == "user-without-email-123"
 

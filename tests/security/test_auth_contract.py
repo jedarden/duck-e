@@ -172,6 +172,64 @@ def test_websocket_accepts_valid_bearer_header_token(client):
         memory_store.assert_called_once_with("auth-contract-user")
 
 
+def test_websocket_ignores_untrusted_client_supplied_proxy_identity(client, monkeypatch):
+    import app.main as main
+
+    monkeypatch.setattr(main, "TRUSTED_PROXY_NETWORKS", ())
+    with patch(
+        "app.main.cost_tracker.can_start_new_session",
+        new=AsyncMock(return_value={
+            "allowed": False,
+            "message": "test stop after identity resolution",
+            "reason": "test",
+        }),
+    ), patch("app.main.UserMemoryStore") as memory_store:
+        with client.websocket_connect(
+            "/session",
+            headers={
+                "Origin": "http://localhost:8000",
+                "X-Forwarded-User": "victim",
+                "X-Forwarded-Email": "victim@example.com",
+                "X-Forwarded-For": "10.20.1.2",
+            },
+        ) as websocket:
+            assert websocket.receive_json()["type"] == "service_unavailable"
+
+        memory_store.assert_not_called()
+
+
+def test_valid_jwt_identity_precedes_proxy_identity(client, monkeypatch):
+    import app.main as main
+
+    token = make_token(**valid_claims(
+        sub="jwt-subject",
+        email="jwt@example.com",
+        name="JWT User",
+        auth_method="google_oauth",
+    ))
+    monkeypatch.setattr(
+        main,
+        "get_trusted_proxy_identity",
+        lambda headers, peer_host, networks: ("proxy-user", "proxy@example.com"),
+    )
+
+    with patch(
+        "app.main.cost_tracker.can_start_new_session",
+        new=AsyncMock(return_value={
+            "allowed": False,
+            "message": "test stop after identity resolution",
+            "reason": "test",
+        }),
+    ), patch("app.main.UserMemoryStore") as memory_store:
+        with client.websocket_connect(
+            f"/session?token={token}",
+            headers={"Origin": "http://localhost:8000"},
+        ) as websocket:
+            assert websocket.receive_json()["type"] == "service_unavailable"
+
+        memory_store.assert_called_once_with("jwt@example.com")
+
+
 @pytest.mark.parametrize(
     ("path", "headers"),
     [

@@ -33,6 +33,11 @@ from app.middleware.auth import (
     get_user_tier_from_token,
     validate_access_token,
 )
+from app.middleware.proxy_identity import (
+    get_trusted_proxy_identity,
+    parse_trusted_proxy_sources,
+    resolve_user_identity,
+)
 
 # Import Google OAuth (optional)
 try:
@@ -74,6 +79,13 @@ from ipaddress import ip_address, IPv4Address, IPv6Address, AddressValueError
 
 # Load and validate realtime configuration using auto-generated config
 logger = getLogger("uvicorn.error")
+
+# The socket peer must be a configured proxy before its identity headers count.
+# Uvicorn's proxy-header rewriting is disabled in the container command so this
+# address remains the actual peer, rather than a value derived from X-Forwarded-For.
+TRUSTED_PROXY_NETWORKS = parse_trusted_proxy_sources(
+    os.getenv("TRUSTED_PROXY_SOURCES", "")
+)
 
 
 class _PrivateAddressResolutionError(Exception):
@@ -498,10 +510,13 @@ async def handle_media_stream(websocket: WebSocket):
     logger.info(json.dumps({"event": "ws.connect", "session_id": session_id,
                             "auth_header_names": auth_relevant, "ts": time.time()}))
 
-    # Extract user identity from OAuth proxy headers or JWT token
-    forwarded_user = headers.get('x-forwarded-user', '')
-    forwarded_email = headers.get('x-forwarded-email', '')
-    forwarded_name = headers.get('x-forwarded-name', '')
+    # Proxy identity headers are accepted only from configured socket peers.
+    peer = websocket.client
+    forwarded_user, forwarded_email = get_trusted_proxy_identity(
+        headers,
+        peer.host if peer is not None else None,
+        TRUSTED_PROXY_NETWORKS,
+    )
 
     jwt_user_info = None
     session_tier = "free"
@@ -541,22 +556,13 @@ async def handle_media_stream(websocket: WebSocket):
         logger.info(json.dumps({"event": "ws.auth_missing", "session_id": session_id,
                                 "present_auth_headers": present, "ts": time.time()}))
 
-    # Determine user identity - JWT token takes priority, then proxy headers
-    user_identity = None
-    user_display_name = None
-
-    if jwt_user_info and jwt_user_info.get("email"):
-        user_identity = jwt_user_info["email"]
-        user_display_name = jwt_user_info.get("name", jwt_user_info["email"])
-    elif jwt_user_info and jwt_user_info.get("sub"):
-        user_identity = jwt_user_info["sub"]
-        user_display_name = jwt_user_info.get("name") or user_identity
-    elif forwarded_email:
-        user_identity = forwarded_email
-        user_display_name = forwarded_name or forwarded_email
-    elif forwarded_user:
-        user_identity = forwarded_user
-        user_display_name = forwarded_user
+    # OAuth is represented by a validated JWT too. Signed identity claims win
+    # over proxy identity; trusted proxy email wins over proxy username.
+    user_identity, user_display_name = resolve_user_identity(
+        jwt_user_info,
+        forwarded_user,
+        forwarded_email,
+    )
 
     logger.info(json.dumps({"event": "ws.user_identity", "session_id": session_id,
                             "user_identity": user_identity, "user_display": user_display_name,
@@ -569,10 +575,7 @@ async def handle_media_stream(websocket: WebSocket):
     elif user_identity:
         admission_identity = f"proxy:{user_identity}"
     else:
-        forwarded_for = headers.get("x-forwarded-for", "")
-        client_host = forwarded_for.split(",", 1)[0].strip() if forwarded_for else None
-        if not client_host and websocket.client is not None:
-            client_host = websocket.client.host
+        client_host = peer.host if peer is not None else None
         admission_identity = f"ip:{client_host or 'unknown'}"
 
     admission = await websocket_connection_limiter.acquire(

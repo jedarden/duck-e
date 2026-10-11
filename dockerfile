@@ -13,4 +13,4 @@ COPY ./VERSION ./VERSION
 RUN export APP_VERSION=$(cat VERSION) && echo "APP_VERSION=$APP_VERSION" >> /etc/environment
 ENV APP_VERSION_FILE=/app/VERSION
 
-CMD [ "uvicorn", "app.main:app", "--port", "8000", "--host", "0.0.0.0"]
+CMD [ "uvicorn", "app.main:app", "--port", "8000", "--host", "0.0.0.0", "--no-proxy-headers"]
