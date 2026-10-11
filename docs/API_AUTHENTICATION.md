@@ -278,10 +278,12 @@ class DuckEClient {
   }
 
   connectWebSocket() {
-    const headers = this.getHeaders();
-    return new WebSocket(`wss://${this.baseUrl}/session`, {
-      headers
-    });
+    const url = new URL('/session', this.baseUrl);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (this.token) {
+      url.searchParams.set('token', this.token);
+    }
+    return new WebSocket(url);
   }
 }
 

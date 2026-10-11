@@ -21,6 +21,7 @@ def client(monkeypatch):
     from app.middleware import auth
 
     monkeypatch.setattr(auth, "JWT_SECRET_KEY", TEST_SECRET)
+    monkeypatch.setattr(auth, "_redis_client", None)
     from app.main import app
 
     return TestClient(app)
@@ -87,6 +88,13 @@ def test_auth_me_rejects_malformed_bearer_header_with_401(client):
     assert response.headers["www-authenticate"] == "Bearer"
 
 
+def test_auth_me_requires_a_credential(client):
+    response = client.get("/auth/me")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
 def test_auth_me_rejects_invalid_signature_with_401(client):
     token = jwt.encode(
         valid_claims(), "different-signing-secret", algorithm="HS256"
@@ -134,6 +142,57 @@ def test_websocket_accepts_valid_browser_query_token(client):
         memory_store.assert_called_once_with("auth-contract-user")
 
 
+def test_websocket_accepts_valid_bearer_header_token(client):
+    token = make_token(**valid_claims())
+    with patch(
+        "app.main.cost_tracker.can_start_new_session",
+        new=AsyncMock(return_value={
+            "allowed": False,
+            "message": "test stop after authentication",
+            "reason": "test",
+        }),
+    ), patch("app.main.UserMemoryStore") as memory_store:
+        with client.websocket_connect(
+            "/session",
+            headers={
+                "Origin": "http://localhost:8000",
+                "Authorization": f"Bearer {token}",
+            },
+        ) as websocket:
+            assert websocket.receive_json()["type"] == "service_unavailable"
+            with pytest.raises(WebSocketDisconnect) as disconnect:
+                websocket.receive_text()
+
+        assert disconnect.value.code == 1013
+        memory_store.assert_called_once_with("auth-contract-user")
+
+
+@pytest.mark.parametrize(
+    ("path", "headers"),
+    [
+        (
+            "/session?token=first&token=second",
+            {"Origin": "http://localhost:8000"},
+        ),
+        (
+            "/session?token=query-token",
+            {
+                "Origin": "http://localhost:8000",
+                "Authorization": "Bearer header-token",
+            },
+        ),
+    ],
+    ids=["repeated-query-token", "header-and-query-token"],
+)
+def test_websocket_rejects_ambiguous_token_transports(client, path, headers):
+    with client.websocket_connect(path, headers=headers) as websocket:
+        with pytest.raises(WebSocketDisconnect) as disconnect:
+            websocket.receive_text()
+
+    assert disconnect.value.code == 1008
+    assert disconnect.value.reason == "Invalid or expired JWT"
+
+
 def test_browser_websocket_query_transport_uses_the_shared_token_validator(client):
     from app.middleware.auth import extract_websocket_token, validate_access_token
 
@@ -167,3 +226,18 @@ def test_missing_origin_log_does_not_include_authorization_value(caplog):
     record = next(record for record in caplog.records if "Missing Origin" in record.getMessage())
     assert record.header_names == ["authorization"]
     assert "secret-token" not in caplog.text
+
+
+@pytest.mark.parametrize("authorization", ["Basic abc", "Bearer malformed-token"])
+@pytest.mark.asyncio
+async def test_optional_http_auth_rejects_supplied_invalid_credentials(authorization):
+    from app.middleware.auth import get_current_user_optional
+    from fastapi import HTTPException
+
+    request = Mock(headers={"authorization": authorization})
+
+    with pytest.raises(HTTPException) as error:
+        await get_current_user_optional(request)
+
+    assert error.value.status_code == 401
+    assert error.value.headers["WWW-Authenticate"] == "Bearer"

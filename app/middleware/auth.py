@@ -16,7 +16,7 @@ from typing import Optional, Dict, Any
 import os
 import logging
 import hashlib
-import redis.asyncio as redis
+import redis
 from uuid import uuid4
 
 from app.models.user import UserTier, TIER_CONFIGURATIONS, TokenData, TierLimits
@@ -599,21 +599,22 @@ async def get_current_user(
 
 
 async def get_current_user_optional(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+    request: Request
 ) -> Optional[Dict[str, Any]]:
     """
     FastAPI dependency: Optional authentication (returns None for anonymous)
 
     Args:
-        credentials: HTTP Bearer credentials (optional)
+        request: HTTP request whose Bearer header is optional
 
     Returns:
         User data from token or None for anonymous
     """
-    if not credentials:
+    token = extract_bearer_token(request.headers.get("authorization"))
+    if token is None:
         return None
 
-    return validate_access_token(credentials.credentials)
+    return validate_access_token(token)
 
 
 class JWTAuthMiddleware:

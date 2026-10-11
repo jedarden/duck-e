@@ -402,7 +402,7 @@ class TestSecurityFeatures:
         """RED: Revoked tokens should be rejected even if valid"""
         import app.middleware.auth as auth
         from app.middleware.auth import validate_token, revoke_token
-        redis_client = Mock()
+        redis_client = Mock(spec=auth.redis.Redis)
         redis_client.get.return_value = "1"
         redis_client.setex.return_value = True
         monkeypatch.setattr(auth, "_redis_client", redis_client)
@@ -418,6 +418,11 @@ class TestSecurityFeatures:
 
         # Revoke the token
         revoke_token("unique-token-id-123")
+        redis_client.setex.assert_called_once_with(
+            "revoked_token:unique-token-id-123",
+            auth.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+            "1",
+        )
 
         # Should reject revoked token
         with pytest.raises(HTTPException) as exc_info:
@@ -425,6 +430,25 @@ class TestSecurityFeatures:
 
         assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
         assert "revoked" in str(exc_info.value.detail).lower()
+        redis_client.get.assert_called_once_with("revoked_token:unique-token-id-123")
+
+    def test_unrevoked_token_is_accepted_by_configured_redis(self, monkeypatch):
+        """A synchronous Redis lookup returning no marker leaves a token valid."""
+        import app.middleware.auth as auth
+
+        redis_client = Mock(spec=auth.redis.Redis)
+        redis_client.get.return_value = None
+        monkeypatch.setattr(auth, "_redis_client", redis_client)
+        payload = {
+            "sub": "user-without-revocation",
+            "tier": "premium",
+            "jti": "unrevoked-token-id",
+            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+        }
+        token = jwt.encode(payload, TEST_SECRET_KEY, algorithm=TEST_ALGORITHM)
+
+        assert auth.validate_token(token)["sub"] == "user-without-revocation"
+        redis_client.get.assert_called_once_with("revoked_token:unrevoked-token-id")
 
     def test_token_includes_issued_at_timestamp(self):
         """RED: Tokens should include 'iat' (issued at) timestamp"""
@@ -568,7 +592,8 @@ class TestFastAPIIntegration:
         from app.middleware.auth import get_current_user_optional
 
         # Should return None for anonymous users
-        user_data = await get_current_user_optional(None)
+        request = Mock(headers={})
+        user_data = await get_current_user_optional(request)
         assert user_data is None
 
 
