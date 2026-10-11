@@ -60,6 +60,7 @@ from app.middleware.cost_protection import (
 from app.middleware.rate_limiting import (
     limiter,
     get_rate_limit_config,
+    WebSocketConnectionLimiter,
     custom_rate_limit_exceeded_handler
 )
 from slowapi.errors import RateLimitExceeded
@@ -272,6 +273,11 @@ cost_tracker = get_cost_tracker()
 # Load rate limit configuration
 rate_limit_config = get_rate_limit_config()
 
+# WebSocket limits are tiered by the validated JWT and keyed by stable user
+# identity. The limiter is process-local, matching the existing in-memory
+# request limiter and the application's single-instance deployment model.
+websocket_connection_limiter = WebSocketConnectionLimiter()
+
 
 def get_app_version() -> str:
     """Read version from VERSION file"""
@@ -466,8 +472,8 @@ async def handle_media_stream(websocket: WebSocket):
     """
     WebSocket endpoint for real-time audio streaming.
 
-    Note: Rate limiting via slowapi is not supported for WebSocket endpoints.
-    Connection limits are enforced via the CostProtectionMiddleware instead.
+    WebSocket admission applies the validated JWT tier's per-minute rate limit
+    and concurrent-session cap before any per-user memory or model work starts.
 
     Handles real-time audio streaming with OpenAI's Realtime API
     """
@@ -498,6 +504,7 @@ async def handle_media_stream(websocket: WebSocket):
     forwarded_name = headers.get('x-forwarded-name', '')
 
     jwt_user_info = None
+    session_tier = "free"
     query_tokens = websocket.query_params.getlist("token")
     try:
         if len(query_tokens) > 1:
@@ -514,11 +521,12 @@ async def handle_media_stream(websocket: WebSocket):
         return
 
     if jwt_payload is not None:
+        session_tier = get_user_tier_from_token(jwt_payload).value
         jwt_user_info = {
             "email": jwt_payload.get("email"),
             "name": jwt_payload.get("name"),
             "sub": jwt_payload["sub"],
-            "tier": get_user_tier_from_token(jwt_payload).value,
+            "tier": session_tier,
             "auth_method": jwt_payload.get("auth_method")
         }
         logger.info(json.dumps({"event": "ws.jwt_auth", "session_id": session_id,
@@ -554,6 +562,54 @@ async def handle_media_stream(websocket: WebSocket):
                             "user_identity": user_identity, "user_display": user_display_name,
                             "ts": time.time()}))
 
+    # JWT subjects are the stable admission identity. Proxy identities and
+    # anonymous clients are isolated by their forwarded identity or source IP.
+    if jwt_payload is not None:
+        admission_identity = f"jwt:{jwt_payload['sub']}"
+    elif user_identity:
+        admission_identity = f"proxy:{user_identity}"
+    else:
+        forwarded_for = headers.get("x-forwarded-for", "")
+        client_host = forwarded_for.split(",", 1)[0].strip() if forwarded_for else None
+        if not client_host and websocket.client is not None:
+            client_host = websocket.client.host
+        admission_identity = f"ip:{client_host or 'unknown'}"
+
+    admission = await websocket_connection_limiter.acquire(
+        admission_identity,
+        session_tier,
+    )
+    admission_acquired = admission.allowed
+    if not admission.allowed:
+        logger.warning(
+            "WebSocket admission rejected: identity=%s tier=%s reason=%s",
+            admission_identity,
+            admission.tier,
+            admission.reason,
+        )
+        try:
+            await websocket.send_json({
+                "type": "connection_limit_exceeded",
+                "reason": admission.reason,
+                "message": (
+                    "Maximum concurrent sessions reached"
+                    if admission.reason == "concurrent_limit"
+                    else "WebSocket connection rate limit exceeded"
+                ),
+                "tier": admission.tier,
+                "rate_limit": admission.rate_limit,
+                "current_connections": admission.current_connections,
+                "max_concurrent_sessions": admission.max_concurrent_sessions,
+                "retry_after_seconds": admission.retry_after_seconds,
+            })
+        except Exception:
+            pass
+        try:
+            await websocket.close(code=1008, reason="WebSocket connection limit exceeded")
+        except Exception:
+            pass
+        return
+
     # Load per-user memory (keyed by email if available, else user id)
     memory_store: UserMemoryStore | None = None
     if user_identity:
@@ -563,6 +619,8 @@ async def handle_media_stream(websocket: WebSocket):
     # Check if we can start a new session (hourly limits, circuit breaker)
     can_start = await cost_tracker.can_start_new_session()
     if not can_start["allowed"]:
+        await websocket_connection_limiter.release(admission_identity)
+        admission_acquired = False
         logger.warning(f"Cannot start new session: {can_start['reason']} - {session_id}")
         try:
             await websocket.send_json({
@@ -603,6 +661,9 @@ async def handle_media_stream(websocket: WebSocket):
         except Exception:
             pass
         await cost_tracker.end_session(session_id)
+        if admission_acquired:
+            await websocket_connection_limiter.release(admission_identity)
+            admission_acquired = False
         return
 
     try:
@@ -1357,4 +1418,6 @@ async def handle_media_stream(websocket: WebSocket):
 
         # End cost tracking session regardless of how the session terminates
         await cost_tracker.end_session(session_id)
+        if admission_acquired:
+            await websocket_connection_limiter.release(admission_identity)
         logger.info(f"Cost tracking ended for session: {session_id}")

@@ -9,6 +9,8 @@ from .rate_limiting import (
     get_rate_limit_config,
     get_rate_limit_for_endpoint,
     get_rate_limit_for_user_tier,
+    WebSocketAdmission,
+    WebSocketConnectionLimiter,
     custom_rate_limit_exceeded_handler,
     check_redis_health as check_rate_limit_redis_health
 )
@@ -71,6 +73,8 @@ __all__ = [
     "get_rate_limit_config",
     "get_rate_limit_for_endpoint",
     "get_rate_limit_for_user_tier",
+    "WebSocketAdmission",
+    "WebSocketConnectionLimiter",
     "custom_rate_limit_exceeded_handler",
     "check_rate_limit_redis_health",
 
