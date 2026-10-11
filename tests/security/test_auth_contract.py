@@ -22,7 +22,12 @@ def client(monkeypatch):
 
     monkeypatch.setattr(auth, "JWT_SECRET_KEY", TEST_SECRET)
     monkeypatch.setattr(auth, "_redis_client", None)
-    from app.main import app
+    from app.main import app, cost_tracker
+
+    # Earlier cost-protection tests can leave the app-wide circuit breaker
+    # active, which would mask these authentication responses with HTTP 503.
+    cost_tracker.circuit_breaker_active = False
+    cost_tracker.circuit_breaker_reset_time = None
 
     return TestClient(app)
 
