@@ -12,6 +12,7 @@ from slowapi.util import get_remote_address
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from math import ceil
+from functools import wraps
 from threading import Lock
 from time import monotonic
 from typing import Optional, Callable, Any
@@ -23,6 +24,8 @@ from prometheus_client import Counter, Histogram
 from app.models.user import TIER_CONFIGURATIONS, UserTier
 
 logger = logging.getLogger(__name__)
+
+WEBSOCKET_ADMISSION_IDENTITY_SCOPE_KEY = "duck_e_websocket_admission_identity"
 
 # Prometheus metrics
 rate_limit_exceeded = Counter(
@@ -191,11 +194,11 @@ class WebSocketAdmission:
 class WebSocketConnectionLimiter:
     """Enforce per-identity, tier-specific WebSocket admission limits.
 
-    The rate limit counts accepted connection attempts in a sliding one-minute
-    window. The concurrent limit counts currently running sessions. Both
-    counters are keyed by a stable identity supplied by the WebSocket handler,
-    rather than by tier, so changing a token's tier cannot bypass existing
-    usage for that identity.
+    The rate limit counts connection attempts in a sliding one-minute window,
+    including attempts rejected by the concurrent-session cap. The concurrent
+    limit counts currently running sessions. Both counters are keyed by a
+    stable identity supplied by the WebSocket handler, rather than by tier, so
+    changing a token's tier cannot bypass existing usage for that identity.
 
     This is intentionally in-memory, matching the application's existing
     single-instance rate limiter. A future multi-replica deployment should
@@ -239,18 +242,12 @@ class WebSocketConnectionLimiter:
         with self._lock:
             attempts = self._attempts[key]
             self._prune(attempts, now)
-            current_connections = self._active_connections[key]
+            current_connections = self._active_connections.get(key, 0)
 
-            if current_connections >= limits.websocket_connections:
-                return WebSocketAdmission(
-                    allowed=False,
-                    reason="concurrent_limit",
-                    tier=tier_enum.value,
-                    rate_limit=limits.rate_limit,
-                    max_concurrent_sessions=limits.websocket_connections,
-                    current_connections=current_connections,
-                )
-
+            # Bound connection churn before checking the concurrent cap. An
+            # identity that repeatedly collides with a full session quota
+            # still consumes request budget, so the concurrency response
+            # cannot be used to bypass per-minute rate limiting.
             rate_limit_count = int(limits.rate_limit.split("/", 1)[0])
             if len(attempts) >= rate_limit_count:
                 retry_after = max(1, ceil(attempts[0] + self.WINDOW_SECONDS - now))
@@ -265,6 +262,17 @@ class WebSocketConnectionLimiter:
                 )
 
             attempts.append(now)
+
+            if current_connections >= limits.websocket_connections:
+                return WebSocketAdmission(
+                    allowed=False,
+                    reason="concurrent_limit",
+                    tier=tier_enum.value,
+                    rate_limit=limits.rate_limit,
+                    max_concurrent_sessions=limits.websocket_connections,
+                    current_connections=current_connections,
+                )
+
             self._active_connections[key] = current_connections + 1
             return WebSocketAdmission(
                 allowed=True,
@@ -296,6 +304,33 @@ class WebSocketConnectionLimiter:
         with self._lock:
             self._attempts.clear()
             self._active_connections.clear()
+
+
+def release_websocket_admission_on_exit(
+    limiter: WebSocketConnectionLimiter,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Release an admitted WebSocket slot whenever its handler exits.
+
+    The handler stores its admission identity in the WebSocket ASGI scope after
+    a successful acquire. Wrapping the full endpoint ensures early returns and
+    setup exceptions release the slot as reliably as normal session teardown.
+    """
+
+    def decorate(handler: Callable[..., Any]) -> Callable[..., Any]:
+        @wraps(handler)
+        async def wrapped(websocket, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return await handler(websocket, *args, **kwargs)
+            finally:
+                identity = websocket.scope.pop(
+                    WEBSOCKET_ADMISSION_IDENTITY_SCOPE_KEY, None
+                )
+                if identity is not None:
+                    await limiter.release(identity)
+
+        return wrapped
+
+    return decorate
 
 
 # Initialize limiter with in-memory storage

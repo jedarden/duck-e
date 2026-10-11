@@ -2,7 +2,11 @@
 
 import pytest
 
-from app.middleware.rate_limiting import WebSocketConnectionLimiter
+from app.middleware.rate_limiting import (
+    WEBSOCKET_ADMISSION_IDENTITY_SCOPE_KEY,
+    WebSocketConnectionLimiter,
+    release_websocket_admission_on_exit,
+)
 
 
 class FakeClock:
@@ -44,7 +48,9 @@ async def test_each_tier_enforces_rate_and_concurrent_limits(
 
     # Releases free concurrent slots but do not erase connection-attempt
     # history, so the per-minute limit still applies.
-    for _ in range(rate_limit - concurrent_limit):
+    # The rejected over-cap connection attempt also counts toward the rate
+    # window, so consume the remaining successful attempts accordingly.
+    for _ in range(rate_limit - concurrent_limit - 1):
         decision = await limiter.acquire(identity, tier)
         assert decision.allowed is True
         await limiter.release(identity)
@@ -53,6 +59,34 @@ async def test_each_tier_enforces_rate_and_concurrent_limits(
     assert rate_limited.allowed is False
     assert rate_limited.reason == "rate_limit"
     assert rate_limited.rate_limit == f"{rate_limit}/minute"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tier", "rate_limit", "concurrent_limit"),
+    [
+        ("free", 5, 1),
+        ("premium", 20, 5),
+        ("enterprise", 100, 20),
+    ],
+)
+async def test_concurrent_rejections_consume_tier_rate_limit(
+    tier, rate_limit, concurrent_limit
+):
+    limiter = WebSocketConnectionLimiter()
+    identity = f"jwt:{tier}-busy-user"
+
+    for _ in range(concurrent_limit):
+        assert (await limiter.acquire(identity, tier)).allowed is True
+
+    for _ in range(rate_limit - concurrent_limit):
+        rejected = await limiter.acquire(identity, tier)
+        assert rejected.allowed is False
+        assert rejected.reason == "concurrent_limit"
+
+    exhausted = await limiter.acquire(identity, tier)
+    assert exhausted.allowed is False
+    assert exhausted.reason == "rate_limit"
 
 
 @pytest.mark.asyncio
@@ -92,6 +126,54 @@ async def test_downgraded_token_cannot_bypass_existing_rate_history():
     assert downgraded.tier == "free"
     assert downgraded.rate_limit == "5/minute"
     assert downgraded.max_concurrent_sessions == 1
+
+
+@pytest.mark.asyncio
+async def test_downgraded_token_observes_existing_concurrent_sessions():
+    limiter = WebSocketConnectionLimiter()
+    identity = "jwt:user-with-premium-sessions"
+
+    # Keep usage below the free tier's rate budget so this specifically
+    # exercises the stricter concurrent cap after a tier downgrade.
+    for _ in range(4):
+        assert (await limiter.acquire(identity, "premium")).allowed is True
+
+    downgraded = await limiter.acquire(identity, "free")
+    assert downgraded.allowed is False
+    assert downgraded.reason == "concurrent_limit"
+    assert downgraded.tier == "free"
+    assert downgraded.current_connections == 4
+    assert downgraded.max_concurrent_sessions == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raises", [False, True])
+async def test_admission_slot_is_released_when_handler_returns_or_raises(raises):
+    limiter = WebSocketConnectionLimiter()
+    identity = "jwt:handler-cleanup-user"
+
+    class FakeWebSocket:
+        def __init__(self):
+            self.scope = {}
+
+    async def endpoint(websocket):
+        assert (await limiter.acquire(identity, "free")).allowed is True
+        websocket.scope[WEBSOCKET_ADMISSION_IDENTITY_SCOPE_KEY] = identity
+        if raises:
+            raise RuntimeError("setup failed")
+        return "finished"
+
+    guarded_endpoint = release_websocket_admission_on_exit(limiter)(endpoint)
+    websocket = FakeWebSocket()
+
+    if raises:
+        with pytest.raises(RuntimeError, match="setup failed"):
+            await guarded_endpoint(websocket)
+    else:
+        assert await guarded_endpoint(websocket) == "finished"
+
+    assert limiter.active_connections(identity) == 0
+    assert WEBSOCKET_ADMISSION_IDENTITY_SCOPE_KEY not in websocket.scope
 
 
 @pytest.mark.asyncio

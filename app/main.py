@@ -66,6 +66,8 @@ from app.middleware.rate_limiting import (
     limiter,
     get_rate_limit_config,
     WebSocketConnectionLimiter,
+    WEBSOCKET_ADMISSION_IDENTITY_SCOPE_KEY,
+    release_websocket_admission_on_exit,
     custom_rate_limit_exceeded_handler
 )
 from slowapi.errors import RateLimitExceeded
@@ -480,6 +482,7 @@ if _oauth_available:
 
 
 @app.websocket("/session")
+@release_websocket_admission_on_exit(websocket_connection_limiter)
 async def handle_media_stream(websocket: WebSocket):
     """
     WebSocket endpoint for real-time audio streaming.
@@ -582,7 +585,6 @@ async def handle_media_stream(websocket: WebSocket):
         admission_identity,
         session_tier,
     )
-    admission_acquired = admission.allowed
     if not admission.allowed:
         logger.warning(
             "WebSocket admission rejected: identity=%s tier=%s reason=%s",
@@ -613,6 +615,8 @@ async def handle_media_stream(websocket: WebSocket):
             pass
         return
 
+    websocket.scope[WEBSOCKET_ADMISSION_IDENTITY_SCOPE_KEY] = admission_identity
+
     # Load per-user memory (keyed by email if available, else user id)
     memory_store: UserMemoryStore | None = None
     if user_identity:
@@ -622,8 +626,6 @@ async def handle_media_stream(websocket: WebSocket):
     # Check if we can start a new session (hourly limits, circuit breaker)
     can_start = await cost_tracker.can_start_new_session()
     if not can_start["allowed"]:
-        await websocket_connection_limiter.release(admission_identity)
-        admission_acquired = False
         logger.warning(f"Cannot start new session: {can_start['reason']} - {session_id}")
         try:
             await websocket.send_json({
@@ -664,9 +666,6 @@ async def handle_media_stream(websocket: WebSocket):
         except Exception:
             pass
         await cost_tracker.end_session(session_id)
-        if admission_acquired:
-            await websocket_connection_limiter.release(admission_identity)
-            admission_acquired = False
         return
 
     try:
@@ -1421,6 +1420,4 @@ async def handle_media_stream(websocket: WebSocket):
 
         # End cost tracking session regardless of how the session terminates
         await cost_tracker.end_session(session_id)
-        if admission_acquired:
-            await websocket_connection_limiter.release(admission_identity)
         logger.info(f"Cost tracking ended for session: {session_id}")
