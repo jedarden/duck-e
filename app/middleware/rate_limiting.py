@@ -5,8 +5,9 @@ Implements per-IP and per-endpoint rate limits using in-memory storage
 NOTE: This implementation uses in-memory storage for single instance deployment.
 Rate limit counters reset on server restart - this is acceptable for the use case.
 """
-from fastapi import Request, HTTPException
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from fastapi import HTTPException, Request
+from fastapi.responses import JSONResponse
+from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from collections import defaultdict, deque
@@ -433,7 +434,7 @@ async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExc
         "message": "Too many requests. Please try again later.",
         "retry_after_seconds": retry_after,
         "endpoint": str(request.url.path),
-        "limit": str(exc)
+        "limit": str(exc.detail)
     }
 
     logger.warning(
@@ -441,10 +442,10 @@ async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExc
         f"on {request.url.path}"
     )
 
-    raise HTTPException(
+    return JSONResponse(
         status_code=429,
-        detail=error_detail,
+        content=error_detail,
         headers={
-            "Retry-After": str(retry_after) if retry_after else "60"
+            "Retry-After": str(retry_after) if retry_after is not None else "60"
         }
     )

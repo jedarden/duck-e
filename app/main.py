@@ -27,6 +27,11 @@ from app.middleware import (
     configure_cors,
     get_websocket_security_middleware
 )
+from app.middleware.request_limits import (
+    RequestSizeLimitMiddleware,
+    ResponseSizeLimitMiddleware,
+)
+from app.middleware.xml_protection import XMLProtectionMiddleware
 from app.middleware.auth import (
     extract_bearer_token,
     extract_websocket_token,
@@ -265,18 +270,20 @@ app.state.limiter = limiter
 # Add rate limit exceeded exception handler
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_exceeded_handler)
 
-# Configure CORS for public access
-# Reads from ALLOWED_ORIGINS environment variable
+# Add middleware from the innermost control outward. Request and response
+# limits protect the app itself; CORS and security headers wrap their rejection
+# responses as well as normal route responses.
+app.add_middleware(CostProtectionMiddleware)
+app.add_middleware(XMLProtectionMiddleware)
+app.add_middleware(RequestSizeLimitMiddleware, max_size_mb=1.0, max_json_depth=50)
+app.add_middleware(ResponseSizeLimitMiddleware, max_size_mb=10.0)
+
+# Configure CORS for public access from ALLOWED_ORIGINS.
 configure_cors(app)
 
-# Add security headers middleware
-# Reads from ENABLE_HSTS, CSP_REPORT_URI environment variables
+# Keep security headers outermost so middleware rejection responses receive them.
 security_middleware = create_security_headers_middleware()
 app.add_middleware(security_middleware)
-
-# Add cost protection middleware
-# Reads from COST_PROTECTION_* environment variables
-app.add_middleware(CostProtectionMiddleware)
 
 # Initialize WebSocket security validator
 ws_security = get_websocket_security_middleware()
@@ -495,6 +502,7 @@ async def handle_media_stream(websocket: WebSocket):
     # Validate WebSocket origin before accepting connection
     if not await ws_security.validate_connection(websocket):
         # Connection rejected by security middleware
+        await websocket.close(code=1008, reason="Origin not allowed")
         return
 
     # Generate unique session ID for cost tracking

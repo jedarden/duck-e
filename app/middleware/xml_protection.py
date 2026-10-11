@@ -9,9 +9,9 @@ Prevents:
 - DTD retrieval attacks
 """
 import logging
+import re
 from xml.etree.ElementTree import XMLParser, ParseError
-from typing import Optional
-from fastapi import Request
+from starlette.datastructures import Headers
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -57,6 +57,13 @@ class XMLProtection:
             Parsed XML element tree
         """
         try:
+            # Reject dangerous declarations before parsing. ElementTree may
+            # expand internal entities while constructing the tree, so checks
+            # after parsing would run too late to protect against a bomb.
+            self._validate_no_dtd(xml_content)
+            self._validate_no_entity_expansion(xml_content)
+            self._validate_no_external_entities(xml_content)
+
             # Create secure XML parser
             parser = XMLParser()
 
@@ -84,10 +91,6 @@ class XMLProtection:
             from xml.etree import ElementTree as ET
             root = ET.fromstring(xml_content, parser=parser)
 
-            # Additional validation
-            self._validate_no_entity_expansion(xml_content)
-            self._validate_no_external_entities(xml_content)
-
             return root
 
         except ParseError as e:
@@ -105,6 +108,12 @@ class XMLProtection:
             if '<!ENTITY' in xml_content:
                 logger.warning("Entity expansion attempt detected in XML")
                 raise Exception("XML entity expansion is not allowed")
+
+    def _validate_no_dtd(self, xml_content: str) -> None:
+        """Reject DTD declarations when DTD processing is disabled."""
+        if self.forbid_dtd and re.search(r"<!DOCTYPE\b", xml_content, re.IGNORECASE):
+            logger.warning("DTD processing attempt detected in XML")
+            raise Exception("XML DTD/entity processing is not allowed")
 
     def _validate_no_external_entities(self, xml_content: str) -> None:
         """
@@ -128,30 +137,48 @@ class XMLProtectionMiddleware:
         self.app = app
         self.protection = XMLProtection()
 
-    async def __call__(self, request: Request, call_next):
-        """
-        Middleware handler
-        """
-        content_type = request.headers.get("content-type", "")
+    async def __call__(self, scope, receive, send):
+        """Validate XML bodies as an ASGI middleware and replay safe requests."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        # Check if request contains XML
-        if "xml" in content_type.lower():
-            try:
-                body = await request.body()
-                xml_content = body.decode('utf-8')
+        headers = Headers(scope=scope)
+        content_type = headers.get("content-type", "")
+        if "xml" not in content_type.lower():
+            await self.app(scope, receive, send)
+            return
 
-                # Validate XML
-                await self.protection.parse_xml(xml_content)
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if not message.get("more_body", False):
+                break
 
-            except Exception as e:
-                logger.warning(f"XML validation failed: {e}")
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "error": "Invalid XML",
-                        "message": str(e)
-                    }
-                )
+        try:
+            xml_content = bytes(body).decode("utf-8")
+            await self.protection.parse_xml(xml_content)
+        except Exception as e:
+            logger.warning(f"XML validation failed: {e}")
+            response = JSONResponse(
+                status_code=400,
+                content={"error": "Invalid XML", "message": str(e)},
+            )
+            await response(scope, receive, send)
+            return
 
-        response = await call_next(request)
-        return response
+        replayed = False
+
+        async def replay_body():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_body, send)

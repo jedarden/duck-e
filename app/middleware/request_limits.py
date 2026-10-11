@@ -14,11 +14,12 @@ from typing import Optional
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import Headers
 
 logger = logging.getLogger(__name__)
 
 
-class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+class RequestSizeLimitMiddleware:
     """
     Limit request payload size to prevent memory exhaustion attacks
     """
@@ -37,50 +38,119 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
             max_size_mb: Maximum request size in MB
             max_json_depth: Maximum JSON nesting depth
         """
-        super().__init__(app)
+        self.app = app
         self.max_size_bytes = int(max_size_mb * 1024 * 1024)
         self.max_json_depth = max_json_depth
 
-    async def dispatch(self, request: Request, call_next):
-        """
-        Middleware dispatch handler
-        """
-        # Check Content-Length header
-        content_length = request.headers.get("content-length")
+    async def __call__(self, scope, receive, send):
+        """Bound and replay HTTP request bodies before they reach route parsing."""
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
+        headers = Headers(scope=scope)
+        content_length = headers.get("content-length")
         if content_length:
             try:
                 size = int(content_length)
-
+                if size < 0:
+                    raise ValueError("negative content length")
                 if size > self.max_size_bytes:
                     logger.warning(
                         f"Request rejected: size {size} bytes exceeds limit "
-                        f"{self.max_size_bytes} bytes from {request.client.host}"
+                        f"{self.max_size_bytes} bytes from {self._client_host(scope)}"
                     )
-                    return JSONResponse(
+                    response = JSONResponse(
                         status_code=413,
                         content={
                             "error": "Payload Too Large",
                             "max_size_mb": self.max_size_bytes / (1024 * 1024)
                         }
                     )
+                    await response(scope, receive, send)
+                    return
 
             except ValueError:
                 logger.warning(f"Invalid Content-Length header: {content_length}")
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=400,
                     content={"error": "Invalid Content-Length header"}
                 )
+                await response(scope, receive, send)
+                return
 
-        # Check JSON depth for JSON requests
-        content_type = request.headers.get("content-type", "")
-        if "application/json" in content_type:
-            json_depth_check = await self.validate_json_depth(request)
-            if json_depth_check:
-                return json_depth_check
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
 
-        response = await call_next(request)
-        return response
+            body.extend(message.get("body", b""))
+            if len(body) > self.max_size_bytes:
+                logger.warning(
+                    "Request rejected: streamed body exceeds limit %s bytes from %s",
+                    self.max_size_bytes,
+                    self._client_host(scope),
+                )
+                response = JSONResponse(
+                    status_code=413,
+                    content={
+                        "error": "Payload Too Large",
+                        "max_size_mb": self.max_size_bytes / (1024 * 1024)
+                    }
+                )
+                await response(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if body and (content_type == "application/json" or content_type.endswith("+json")):
+            depth = None
+            try:
+                parsed = json.loads(body)
+            except json.JSONDecodeError:
+                pass  # Let FastAPI return its normal malformed-JSON error.
+            except RecursionError:
+                depth = self.max_json_depth + 1
+            else:
+                depth = self._get_json_depth(parsed)
+
+            if depth is not None and depth > self.max_json_depth:
+                logger.warning(
+                    "JSON bomb attempt detected: depth %s exceeds limit %s from %s",
+                    depth,
+                    self.max_json_depth,
+                    self._client_host(scope),
+                )
+                response = JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "JSON payload too deeply nested",
+                        "max_depth": self.max_json_depth,
+                        "detected_depth": depth,
+                    },
+                )
+                await response(scope, receive, send)
+                return
+
+        replayed = False
+
+        async def replay_body():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay_body, send)
+
+    @staticmethod
+    def _client_host(scope) -> str:
+        client = scope.get("client")
+        return client[0] if client else "unknown"
 
     async def check_request_size(self, request: Request) -> Optional[Response]:
         """
@@ -150,6 +220,15 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                     }
                 )
 
+        except RecursionError:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "JSON payload too deeply nested",
+                    "max_depth": self.max_json_depth,
+                    "detected_depth": self.max_json_depth + 1,
+                },
+            )
         except json.JSONDecodeError:
             # Invalid JSON - let the application handle it
             pass
@@ -169,26 +248,16 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
         Returns:
             Maximum depth
         """
-        if not isinstance(obj, (dict, list)):
-            return current_depth
-
-        if isinstance(obj, dict):
-            if not obj:
-                return current_depth
-            return max(
-                self._get_json_depth(value, current_depth + 1)
-                for value in obj.values()
-            )
-
-        if isinstance(obj, list):
-            if not obj:
-                return current_depth
-            return max(
-                self._get_json_depth(item, current_depth + 1)
-                for item in obj
-            )
-
-        return current_depth
+        maximum_depth = current_depth
+        pending = [(obj, current_depth)]
+        while pending:
+            value, depth = pending.pop()
+            maximum_depth = max(maximum_depth, depth)
+            if isinstance(value, dict):
+                pending.extend((child, depth + 1) for child in value.values())
+            elif isinstance(value, list):
+                pending.extend((child, depth + 1) for child in value)
+        return maximum_depth
 
 
 class ResponseSizeLimitMiddleware(BaseHTTPMiddleware):
@@ -213,14 +282,16 @@ class ResponseSizeLimitMiddleware(BaseHTTPMiddleware):
         """
         response = await call_next(request)
 
-        # Check response size
-        if hasattr(response, 'body') and response.body:
-            body_size = len(response.body)
-
+        chunks = []
+        body_size = 0
+        async for chunk in response.body_iterator:
+            if not isinstance(chunk, bytes):
+                chunk = str(chunk).encode()
+            body_size += len(chunk)
             if body_size > self.max_size_bytes:
                 logger.warning(
-                    f"Response truncated: size {body_size} bytes exceeds limit "
-                    f"{self.max_size_bytes} bytes for {request.url.path}"
+                    f"Response rejected: size exceeds limit {self.max_size_bytes} bytes "
+                    f"for {request.url.path}"
                 )
                 return JSONResponse(
                     status_code=413,
@@ -230,8 +301,17 @@ class ResponseSizeLimitMiddleware(BaseHTTPMiddleware):
                         "max_size_mb": self.max_size_bytes / (1024 * 1024)
                     }
                 )
+            chunks.append(chunk)
 
-        return response
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        headers.pop("transfer-encoding", None)
+        return Response(
+            content=b"".join(chunks),
+            status_code=response.status_code,
+            headers=headers,
+            background=response.background,
+        )
 
     async def validate_response_size(self, response: Response) -> Response:
         """
@@ -248,6 +328,7 @@ class ResponseSizeLimitMiddleware(BaseHTTPMiddleware):
                     status_code=413,
                     content={
                         "error": "Response Too Large",
+                        "message": "The requested resource is too large to return",
                         "max_size_mb": self.max_size_bytes / (1024 * 1024)
                     }
                 )
