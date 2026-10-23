@@ -90,6 +90,38 @@ session.register_tool(
 - **CORS**: Origin whitelist in `app.middleware.configure_cors()`
 - **Cost protection**: $5/session hard limit, $100 circuit breaker
 
+### Push-to-Talk (PTT) Mode
+
+**Overview**: PTT mode allows users to control when the microphone is active by holding a button or pressing spacebar. This prevents the assistant from listening when not intended.
+
+**UI Elements** (in `chat.html`):
+- `.ptt-controls` - Container for PTT UI (toggle + button + hint)
+- `.ptt-toggle` - Checkbox to enable/disable PTT mode
+- `.ptt-btn` - Large button labeled "🎤 Hold to Talk"
+- `.ptt-hint` - "Or press and hold Spacebar" (hidden on mobile)
+
+**JavaScript Implementation** (in `main.js`):
+- `isPushToTalk` - Global state variable (default: false)
+- `STORAGE_KEYS.PTT = 'duck-e-ptt'` - localStorage key for persistence
+- `loadPushToTalkState()` / `savePushToTalkState()` - Persist across sessions
+- `updatePTTUI(enabled)` - Show/hide PTT button and hint
+- `togglePushToTalk()` - Switch between continuous and PTT modes
+- `startTalking()` / `stopTalking()` - Microphone control during hold
+- Keyboard listeners - Spacebar when PTT mode enabled
+
+**PTT Behavior**:
+1. When PTT is **disabled** (default): Microphone is always on when connected (unless muted)
+2. When PTT is **enabled**: Microphone is off by default
+3. While holding button/spacebar: Microphone temporarily enabled
+4. On release: Microphone disabled again
+5. State persists in localStorage across browser sessions
+
+**Voice Change Interaction**:
+- Voice changes use OpenAI's `session.update` event (in-place update, no reinit)
+- PTT state (`isPushToTalk`) is preserved during voice changes
+- Microphone state is correctly restored: if in PTT mode, mic stays disabled by default
+- No reconnection needed — the WebRTC session persists across voice changes
+
 ## Model Configuration
 
 Uses `gpt-realtime-2` for voice sessions. Config generated in `app/config.py`:
@@ -126,7 +158,8 @@ pytest tests/security/
 ## Common Gotchas
 
 1. **Ephemeral key flow**: Never send real `OPENAI_API_KEY` to client. Only send `client_secret.value` from `/v1/realtime/sessions` response.
-2. **Voice change**: Requires session reinit — `change_voice` tool sends new config, client reconnects WebRTC.
+2. **Voice change**: Uses OpenAI's `session.update` event (in-place update, no reinit needed). The WebRTC connection persists, PTT state is preserved, and the new voice applies to subsequent responses.
 3. **Memory persistence**: Requires user headers from reverse proxy — won't work in local dev without mocking headers. In production this also doesn't work over `/session` even behind the reverse proxy, since that route skips the auth middleware entirely (see Deployment section) — nothing has ever been persisted to `/data/memory` in the live deployment. Fixing this needs either a `/session`-compatible way to inject identity (e.g. a signed cookie set before the WebSocket upgrade) or wiring up the existing JWT-via-query-param fallback on the frontend.
 4. **AG2 references**: Code still uses `ag2.init` message type for client compatibility, but backend is custom `RealtimeSession`.
 5. **Cost display resets**: On reconnect, `resetCostState()` called in `main.js` → `connectAudio()`.
+6. **PTT mode persistence**: PTT state is stored in localStorage and restored on page load, but microphone state must be reapplied after connection establishes. See `toggleConnection()` in main.js lines 1124-1131 where saved PTT state determines whether mic starts enabled or disabled.
