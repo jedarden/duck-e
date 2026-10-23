@@ -117,3 +117,7 @@ dmypy.json
 .beads/*.temp
 .beads/*.journal
 .br_recovery/
+
+# Local verification extractions
+.dod-ducke-*/
+.verify-ducke-*/
