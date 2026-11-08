@@ -142,9 +142,12 @@ curl http://localhost:8000/health/openai
 
 Weather needs no separate credential: `get_current_weather` and
 `get_weather_forecast` geocode the requested city and fetch conditions from
-Open-Meteo. To check those paths without a live voice session, run
-`pytest -q tests/test_weather_tools.py` after installing the development
-requirements.
+Open-Meteo. To check those paths without a live voice session:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q tests/test_weather_tools.py
+```
 
 ### 2. Production Deployment (2 hours)
 

@@ -24,6 +24,7 @@ Run these commands from your DUCK-E checkout:
 ```bash
 # Verify dependencies installed
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # Copy environment template
 cp .env.example .env
