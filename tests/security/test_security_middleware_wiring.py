@@ -336,3 +336,9 @@ def test_weather_tool_sanitizes_upstream_response_through_production_websocket(
     assert "<script>" not in message["result"]
     assert "alert('xss')" not in message["result"]
     assert "Sunny" in message["result"]
+
+    # The anonymous connection's cost tracking must have started with the
+    # free tier so its session budget and timeout match the free tier.
+    start_session_args = main.cost_tracker.start_session.call_args
+    assert start_session_args is not None
+    assert start_session_args.args[1] == "free"

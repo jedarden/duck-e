@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 import json
 import os
 
+from app.models.user import TIER_CONFIGURATIONS, UserTier
+
 # Optional redis import - only needed if REDIS_URL is configured
 try:
     import redis.asyncio as redis
@@ -128,6 +130,10 @@ class SessionCostTracker:
         self.session_costs: Dict[str, float] = {}
         self.session_tokens: Dict[str, Dict[str, int]] = defaultdict(lambda: {"input": 0, "output": 0})
         self.session_start_times: Dict[str, datetime] = {}
+        # Validated JWT tier per session ('free', 'premium', 'enterprise').
+        # Sessions tracked without a tier fall back to the globally
+        # configured limits.
+        self.session_tiers: Dict[str, Optional[str]] = {}
 
         # Circuit breaker state
         self.circuit_breaker_active = False
@@ -137,11 +143,22 @@ class SessionCostTracker:
 
         logger.info("SessionCostTracker initialized")
 
-    async def start_session(self, session_id: str):
-        """Initialize cost tracking for a new session"""
+    async def start_session(self, session_id: str, tier: Optional[str] = None):
+        """Initialize cost tracking for a new session.
+
+        Args:
+            session_id: Unique session identifier
+            tier: Validated JWT tier for the session ('free', 'premium',
+                'enterprise'). Anonymous sessions pass 'free'. Unrecognized
+                or missing tiers fall back to the globally configured
+                session limits.
+        """
         self.session_start_times[session_id] = datetime.utcnow()
         self.session_costs[session_id] = 0.0
+        self.session_tiers[session_id] = tier
         active_sessions.inc()
+
+        session_limits = self.get_session_limits(session_id)
 
         if self.redis_client:
             try:
@@ -151,17 +168,50 @@ class SessionCostTracker:
                         "start_time": self.session_start_times[session_id].isoformat(),
                         "cost": "0.0",
                         "input_tokens": "0",
-                        "output_tokens": "0"
+                        "output_tokens": "0",
+                        "tier": session_limits["tier"] or "unclassified"
                     }
                 )
                 await self.redis_client.expire(
                     f"session:{session_id}",
-                    self.config.max_session_duration_minutes * 60 + 300  # Add 5 min buffer
+                    session_limits["max_session_duration_seconds"] + 300  # Add 5 min buffer
                 )
             except Exception as e:
                 logger.error(f"Failed to store session in Redis: {e}")
 
-        logger.info(f"Session started: {session_id}")
+        logger.info(
+            f"Session started: {session_id}, tier={session_limits['tier'] or 'unclassified'}, "
+            f"budget=${session_limits['max_session_cost_usd']:.2f}, "
+            f"timeout={session_limits['max_session_duration_seconds']}s"
+        )
+
+    def get_session_limits(self, session_id: str) -> Dict[str, Any]:
+        """Return the budget and duration limits that apply to a session.
+
+        Sessions admitted with a validated JWT tier are governed by that
+        tier's advertised limits (API_AUTHENTICATION.md); sessions tracked
+        without a recognized tier fall back to the globally configured
+        limits so unspecified sessions are never granted unlimited spend.
+        """
+        tier = self.session_tiers.get(session_id)
+        try:
+            tier_enum = UserTier(tier) if tier is not None else None
+        except (TypeError, ValueError):
+            tier_enum = None
+
+        if tier_enum is not None:
+            tier_limits = TIER_CONFIGURATIONS[tier_enum]
+            return {
+                "tier": tier_enum.value,
+                "max_session_cost_usd": tier_limits.session_budget,
+                "max_session_duration_seconds": tier_limits.session_timeout,
+            }
+
+        return {
+            "tier": None,
+            "max_session_cost_usd": self.config.max_session_cost_usd,
+            "max_session_duration_seconds": self.config.max_session_duration_minutes * 60,
+        }
 
     async def end_session(self, session_id: str):
         """End session and record metrics"""
@@ -174,6 +224,7 @@ class SessionCostTracker:
             self.session_start_times.pop(session_id, None)
             self.session_costs.pop(session_id, None)
             self.session_tokens.pop(session_id, None)
+            self.session_tiers.pop(session_id, None)
 
             if self.redis_client:
                 try:
@@ -317,24 +368,31 @@ class SessionCostTracker:
         """
         Check if session is within budget limits
 
+        Budget and duration limits come from the session's validated JWT
+        tier; sessions without a recognized tier use the globally
+        configured limits.
+
         Returns:
             Dict with budget status and remaining budget
         """
         config = self.config
+        session_limits = self.get_session_limits(session_id)
+        max_session_cost_usd = session_limits["max_session_cost_usd"]
+        tier_max_duration_seconds = session_limits["max_session_duration_seconds"]
 
         # Check session cost limit
-        budget_ok = current_cost < config.max_session_cost_usd
-        remaining_budget = config.max_session_cost_usd - current_cost
+        budget_ok = current_cost < max_session_cost_usd
+        remaining_budget = max_session_cost_usd - current_cost
 
         # Check session duration
         if session_id in self.session_start_times:
             duration = (datetime.utcnow() - self.session_start_times[session_id]).total_seconds()
-            max_duration_seconds = config.max_session_duration_minutes * 60
+            max_duration_seconds = tier_max_duration_seconds
             duration_ok = duration < max_duration_seconds
             remaining_duration = max_duration_seconds - duration
         else:
             duration_ok = True
-            remaining_duration = config.max_session_duration_minutes * 60
+            remaining_duration = tier_max_duration_seconds
 
         # Check circuit breaker
         circuit_breaker_ok = not self.circuit_breaker_active
@@ -355,6 +413,9 @@ class SessionCostTracker:
             "circuit_breaker_active": self.circuit_breaker_active,
             "hourly_cost_usd": self.total_cost_last_hour,
             "max_hourly_cost_usd": config.max_total_cost_per_hour_usd,
+            "tier": session_limits["tier"],
+            "max_session_cost_usd": max_session_cost_usd,
+            "max_session_duration_seconds": tier_max_duration_seconds,
             "warnings": self._get_warnings(budget_ok, duration_ok, circuit_breaker_ok, hourly_ok)
         }
 

@@ -58,6 +58,26 @@ Authorization: Bearer YOUR_JWT_TOKEN
 - **Session Timeout**: 8 hours
 - **Concurrent Connections**: 20
 
+### Limit Enforcement
+
+All four limits are enforced server-side per session, using the tier of the
+validated JWT that admitted the connection:
+
+- **Rate Limit and Concurrent Connections** — enforced at WebSocket admission
+  (`/session`), keyed by stable user identity. Over-limit connections are
+  refused before the session starts.
+- **Session Budget and Session Timeout** — enforced by the session cost
+  tracker for the lifetime of the connection. A session that crosses its
+  tier's budget is terminated with a `budget_exceeded` message and close code
+  `1008`; a session that outlives its tier's timeout is terminated with a
+  `session_timeout` message and close code `1008`. Anonymous connections are
+  subject to the free-tier budget and timeout.
+
+Sessions tracked without a validated JWT tier fall back to the globally
+configured `COST_PROTECTION_MAX_SESSION_COST_USD` /
+`COST_PROTECTION_MAX_SESSION_DURATION_MINUTES` limits, which default to the
+free-tier values — such sessions are never granted a paid tier's allowance.
+
 ## JWT Token Contract
 
 An access JWT must have a valid signature using the configured algorithm, a
@@ -541,6 +561,6 @@ For issues or questions:
 
 ---
 
-**Last Updated**: 2026-10-11
+**Last Updated**: 2026-11-08
 **API Version**: 1.0.0
 **Authentication**: Optional JWT Bearer

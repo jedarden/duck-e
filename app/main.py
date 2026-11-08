@@ -653,9 +653,10 @@ async def handle_media_stream(websocket: WebSocket):
             pass
         return
 
-    # Initialize cost tracking for this session
-    await cost_tracker.start_session(session_id)
-    logger.info(f"Cost tracking started for session: {session_id}")
+    # Initialize cost tracking for this session. The validated JWT tier
+    # selects the session budget and maximum duration (anonymous is free tier).
+    await cost_tracker.start_session(session_id, session_tier)
+    logger.info(f"Cost tracking started for session: {session_id}, tier: {session_tier}")
 
     # Check circuit breaker before allowing connection (redundant but safe)
     await cost_tracker.check_circuit_breaker()
@@ -783,10 +784,14 @@ async def handle_media_stream(websocket: WebSocket):
             on_turn_done=_on_turn_done if memory_store is not None else None,
         )
 
-        # Start session duration watchdog task
+        # Start session duration watchdog task. Limits follow the session's
+        # validated JWT tier (free/premium/enterprise), not the global default.
+        session_limits = cost_tracker.get_session_limits(session_id)
+
         async def duration_watchdog():
-            """Monitor session duration and close if exceeds limit"""
-            max_duration_seconds = cost_tracker.config.max_session_duration_minutes * 60
+            """Monitor session duration and close if exceeds tier limit"""
+            max_duration_seconds = session_limits["max_session_duration_seconds"]
+            max_duration_minutes = max_duration_seconds // 60
             check_interval = 10  # Check every 10 seconds
 
             while True:
@@ -804,7 +809,7 @@ async def handle_media_stream(websocket: WebSocket):
                         try:
                             await websocket.send_json({
                                 "type": "session_timeout",
-                                "error": f"Session exceeded maximum duration of {cost_tracker.config.max_session_duration_minutes} minutes",
+                                "error": f"Session exceeded maximum duration of {max_duration_minutes} minutes",
                                 "duration_seconds": duration
                             })
                             await websocket.close(code=1008, reason="Session duration exceeded")
@@ -1010,10 +1015,15 @@ async def handle_media_stream(websocket: WebSocket):
                     # Check if budget was exceeded and terminate session if so
                     if not usage_result.get("budget_ok", True):
                         logger.warning(f"Budget exceeded for session {session_id}, closing connection")
+                        # Report the cap that actually applied to this tier.
+                        budget_cap = usage_result.get(
+                            "max_session_cost_usd",
+                            cost_tracker.get_session_limits(session_id)["max_session_cost_usd"],
+                        )
                         try:
                             await websocket.send_json({
                                 "type": "budget_exceeded",
-                                "error": f"Session budget limit of ${cost_tracker.config.max_session_cost_usd:.2f} exceeded",
+                                "error": f"Session budget limit of ${budget_cap:.2f} exceeded",
                                 "session_cost": usage_result.get("session_cost"),
                                 "warnings": usage_result.get("warnings", [])
                             })

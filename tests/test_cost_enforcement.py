@@ -1,6 +1,7 @@
 """
 Unit tests for cost cap enforcement
-Tests new functionality: circuit breaker auto-activation, hourly limits, gpt-5.4-nano pricing
+Tests new functionality: circuit breaker auto-activation, hourly limits, gpt-5.4-nano pricing,
+and tier-specific session budgets and timeouts (anonymous/premium/enterprise)
 """
 import pytest
 from datetime import datetime, timedelta
@@ -11,6 +12,7 @@ from app.middleware.cost_protection import (
     SessionCostTracker,
     get_cost_config
 )
+from app.models.user import TIER_CONFIGURATIONS, UserTier
 
 
 @pytest.mark.asyncio
@@ -294,6 +296,216 @@ class TestBudgetExtermination:
             "max_hourly_cost_usd should be reported"
         assert "Hourly cost limit exceeded" in budget_status["warnings"], \
             "Warnings should mention hourly limit exceeded"
+
+
+@pytest.mark.asyncio
+class TestTierSessionLimits:
+    """Enforce the per-tier session budgets and timeouts advertised in
+    docs/API_AUTHENTICATION.md: free $5/30min, premium $20/2h, enterprise
+    $100/8h. Anonymous sessions are the free tier."""
+
+    # gpt-5 pricing: $10 per 1M input tokens, so `spend * 100_000` input
+    # tokens with zero output tokens costs exactly `spend` dollars.
+    @staticmethod
+    async def _track_spend(tracker: SessionCostTracker, session_id: str, spend_usd: float):
+        return await tracker.track_usage(
+            session_id=session_id,
+            model="gpt-5",
+            input_tokens=int(spend_usd * 100_000),
+            output_tokens=0,
+        )
+
+    @staticmethod
+    def _isolate_tier_budget(tracker: SessionCostTracker) -> None:
+        """Raise system-wide controls so only the tier budget is under test.
+
+        Circuit breaker and hourly caps have their own test classes; leaving
+        them at defaults would trip before enterprise-sized spends do.
+        """
+        tracker.config.max_total_cost_per_hour_usd = 10_000.0
+        tracker.config.circuit_breaker_threshold_usd = 100_000.0
+
+    @pytest.mark.parametrize(
+        ("tier", "budget", "timeout_seconds"),
+        [
+            ("free", 5.0, 30 * 60),
+            ("premium", 20.0, 2 * 60 * 60),
+            ("enterprise", 100.0, 8 * 60 * 60),
+        ],
+    )
+    async def test_session_limits_match_advertised_tier_values(
+        self, tier, budget, timeout_seconds
+    ):
+        tracker = SessionCostTracker()
+        session_id = f"tier-limits-{tier}"
+        await tracker.start_session(session_id, tier)
+
+        limits = tracker.get_session_limits(session_id)
+
+        assert limits == {
+            "tier": tier,
+            "max_session_cost_usd": budget,
+            "max_session_duration_seconds": timeout_seconds,
+        }
+
+    @pytest.mark.parametrize(
+        ("tier", "budget"),
+        [
+            ("free", 5.0),
+            ("premium", 20.0),
+            ("enterprise", 100.0),
+        ],
+    )
+    async def test_tier_session_budget_is_enforced(self, tier, budget):
+        """A session survives spend just under its tier budget and is cut
+        off once that tier budget is crossed."""
+        tracker = SessionCostTracker()
+        self._isolate_tier_budget(tracker)
+        session_id = f"tier-budget-{tier}"
+        await tracker.start_session(session_id, tier)
+
+        usage = await self._track_spend(tracker, session_id, budget - 1.0)
+
+        assert usage["budget_ok"] is True, (
+            f"{tier} session must survive ${budget - 1.0:.2f} of its ${budget:.2f} budget"
+        )
+        assert usage["tier"] == tier
+        assert usage["max_session_cost_usd"] == budget
+        assert usage["remaining_budget_usd"] == pytest.approx(1.0)
+
+        usage = await self._track_spend(tracker, session_id, 2.0)
+
+        assert usage["session_cost"] >= budget
+        assert usage["budget_ok"] is False
+        assert "Session budget limit exceeded" in usage["warnings"]
+
+    async def test_anonymous_session_defaults_to_free_budget(self):
+        """Anonymous sessions (no tier claim) are the free tier: cut off at
+        the $5 budget, not granted premium or enterprise spend."""
+        tracker = SessionCostTracker()
+        self._isolate_tier_budget(tracker)
+        session_id = "anonymous-budget"
+        await tracker.start_session(session_id, "free")
+
+        usage = await self._track_spend(tracker, session_id, 6.0)
+
+        assert usage["tier"] == "free"
+        assert usage["session_cost"] >= 5.0
+        assert usage["budget_ok"] is False
+        assert "Session budget limit exceeded" in usage["warnings"]
+
+    async def test_premium_session_not_capped_at_free_budget(self):
+        """Regression for the flat $5 cap: a premium session's $10 spend must
+        be allowed, while the same spend exceeds a free session's budget."""
+        tracker = SessionCostTracker()
+        self._isolate_tier_budget(tracker)
+
+        await tracker.start_session("contrast-premium", "premium")
+        premium_usage = await self._track_spend(tracker, "contrast-premium", 10.0)
+        assert premium_usage["budget_ok"] is True
+
+        await tracker.start_session("contrast-free", "free")
+        free_usage = await self._track_spend(tracker, "contrast-free", 10.0)
+        assert free_usage["budget_ok"] is False
+        assert "Session budget limit exceeded" in free_usage["warnings"]
+
+    async def test_enterprise_session_not_capped_at_premium_budget(self):
+        """A $50 spend fits an enterprise budget but exceeds a premium one."""
+        tracker = SessionCostTracker()
+        self._isolate_tier_budget(tracker)
+
+        await tracker.start_session("contrast-enterprise", "enterprise")
+        enterprise_usage = await self._track_spend(tracker, "contrast-enterprise", 50.0)
+        assert enterprise_usage["budget_ok"] is True
+
+        await tracker.start_session("contrast-premium", "premium")
+        premium_usage = await self._track_spend(tracker, "contrast-premium", 50.0)
+        assert premium_usage["budget_ok"] is False
+        assert premium_usage["max_session_cost_usd"] == 20.0
+        assert "Session budget limit exceeded" in premium_usage["warnings"]
+
+    @pytest.mark.parametrize(
+        ("tier", "age_minutes", "within_limit"),
+        [
+            ("free", 29, True),
+            ("free", 31, False),
+            ("premium", 31, True),
+            ("premium", 121, False),
+            ("enterprise", 121, True),
+            ("enterprise", 481, False),
+        ],
+    )
+    async def test_tier_session_duration_is_enforced(
+        self, tier, age_minutes, within_limit
+    ):
+        """Session age is judged against the tier's advertised timeout."""
+        tracker = SessionCostTracker()
+        session_id = f"tier-duration-{tier}"
+        await tracker.start_session(session_id, tier)
+        tracker.session_start_times[session_id] = (
+            datetime.utcnow() - timedelta(minutes=age_minutes)
+        )
+
+        status = await tracker.check_budget(session_id, 1.0)
+
+        assert status["tier"] == tier
+        assert status["max_session_duration_seconds"] == (
+            TIER_CONFIGURATIONS[UserTier(tier)].session_timeout
+        )
+        assert status["budget_ok"] is within_limit
+        if within_limit:
+            assert status["remaining_duration_seconds"] > 0
+        else:
+            assert "Session duration limit exceeded" in status["warnings"]
+            assert status["remaining_duration_seconds"] == 0
+
+    async def test_unrecognized_tier_falls_back_to_configured_limits(self):
+        """A tier the model does not know must never yield unlimited spend:
+        enforcement falls back to the globally configured session limits."""
+        tracker = SessionCostTracker()
+        session_id = "unrecognized-tier"
+        await tracker.start_session(session_id, "platinum")
+
+        limits = tracker.get_session_limits(session_id)
+
+        assert limits["tier"] is None
+        assert limits["max_session_cost_usd"] == tracker.config.max_session_cost_usd
+        assert limits["max_session_duration_seconds"] == (
+            tracker.config.max_session_duration_minutes * 60
+        )
+
+        configured_cap = tracker.config.max_session_cost_usd
+        usage = await self._track_spend(tracker, session_id, configured_cap + 1.0)
+        assert usage["budget_ok"] is False
+        assert "Session budget limit exceeded" in usage["warnings"]
+
+    async def test_untagged_session_uses_configured_limits(self):
+        """Sessions started without a tier (legacy callers) keep the globally
+        configured limits rather than gaining a tier's higher allowance."""
+        tracker = SessionCostTracker()
+        session_id = "untagged-session"
+
+        await tracker.start_session(session_id)
+        limits = tracker.get_session_limits(session_id)
+
+        assert limits["tier"] is None
+        assert limits["max_session_cost_usd"] == tracker.config.max_session_cost_usd
+        assert limits["max_session_duration_seconds"] == (
+            tracker.config.max_session_duration_minutes * 60
+        )
+
+    async def test_end_session_clears_tier_limits(self):
+        tracker = SessionCostTracker()
+        session_id = "ended-tier-session"
+        await tracker.start_session(session_id, "enterprise")
+        assert tracker.get_session_limits(session_id)["tier"] == "enterprise"
+
+        await tracker.end_session(session_id)
+
+        assert session_id not in tracker.session_tiers
+        limits = tracker.get_session_limits(session_id)
+        assert limits["tier"] is None
+        assert limits["max_session_cost_usd"] == tracker.config.max_session_cost_usd
 
 
 if __name__ == "__main__":
