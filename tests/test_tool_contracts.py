@@ -46,8 +46,16 @@ class FakeCostTracker:
     async def can_start_new_session(self):
         return {"allowed": True}
 
-    async def start_session(self, session_id):
+    async def start_session(self, session_id, tier="free"):
         self.session_start_times[session_id] = None
+        self.tier = tier
+
+    def get_session_limits(self, session_id):
+        return {
+            "tier": self.tier,
+            "max_session_cost_usd": self.config.max_session_cost_usd,
+            "max_session_duration_seconds": self.config.max_session_duration_minutes * 60,
+        }
 
     async def check_circuit_breaker(self):
         return None

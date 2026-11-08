@@ -24,7 +24,7 @@ const ws = new WebSocket('wss://api.ducke.io/session');
 
 **Limits:**
 - **Rate Limit**: 5 WebSocket connections per minute
-- **Session Budget**: $5.00
+- **Tracked API Budget per Session**: $5.00
 - **Session Timeout**: 30 minutes
 - **Concurrent Connections**: 1
 
@@ -39,7 +39,7 @@ Authorization: Bearer YOUR_JWT_TOKEN
 
 **Limits:**
 - **Rate Limit**: 20 WebSocket connections per minute
-- **Session Budget**: $20.00
+- **Tracked API Budget per Session**: $20.00
 - **Session Timeout**: 2 hours
 - **Concurrent Connections**: 5
 
@@ -54,29 +54,38 @@ Authorization: Bearer YOUR_JWT_TOKEN
 
 **Limits:**
 - **Rate Limit**: 100 WebSocket connections per minute
-- **Session Budget**: $100.00
+- **Tracked API Budget per Session**: $100.00
 - **Session Timeout**: 8 hours
 - **Concurrent Connections**: 20
 
 ### Limit Enforcement
 
-All four limits are enforced server-side per session, using the tier of the
-validated JWT that admitted the connection:
+The tier values below apply to the validated JWT that admitted the connection:
 
 - **Rate Limit and Concurrent Connections** — enforced at WebSocket admission
   (`/session`), keyed by stable user identity. Over-limit connections are
   refused before the session starts.
-- **Session Budget and Session Timeout** — enforced by the session cost
-  tracker for the lifetime of the connection. A session that crosses its
-  tier's budget is terminated with a `budget_exceeded` message and close code
-  `1008`; a session that outlives its tier's timeout is terminated with a
-  `session_timeout` message and close code `1008`. Anonymous connections are
-  subject to the free-tier budget and timeout.
+- **Session Budget** — the server tracks costs from its own API calls, such as
+  web search, against the tier's budget. When those tracked costs reach the
+  budget, it sends `budget_exceeded` and closes the WebSocket with code `1008`.
+  Voice conversation runs over a browser-to-OpenAI WebRTC connection. Its
+  `response.done` usage is shown in the browser cost display but is not sent
+  through the server's cost tracker, so the server cannot enforce a total
+  voice-plus-tool spending cap. The tier budget is therefore a cap on tracked
+  server-side API usage, not a guaranteed total session spend limit.
+- **Session Timeout** — the server closes the WebSocket with a
+  `session_timeout` message and code `1008` when the tier's maximum duration
+  is reached. The browser closes its WebRTC peer when that socket closes.
+  Anonymous connections use the free-tier budget and timeout.
+
+The service-wide hourly cost limit and circuit breaker can stop a session
+before its tier's server-side API budget is reached.
 
 Sessions tracked without a validated JWT tier fall back to the globally
 configured `COST_PROTECTION_MAX_SESSION_COST_USD` /
 `COST_PROTECTION_MAX_SESSION_DURATION_MINUTES` limits, which default to the
-free-tier values — such sessions are never granted a paid tier's allowance.
+free-tier values. The `/session` endpoint always supplies `free` for anonymous
+connections or a validated JWT tier for authenticated connections.
 
 ## JWT Token Contract
 
@@ -518,7 +527,7 @@ See `/tests/security/test_authentication.py` for comprehensive test suite coveri
 ### Q: What happens if I don't provide a token?
 
 **A**: Optional-auth routes and `/session` use the free tier when you supply no
-credential (5 WebSocket connections/minute, $5 session budget). `/auth/me`
+credential (5 WebSocket connections/minute, $5 tracked API budget). `/auth/me`
 requires a valid access token and returns 401 without one.
 
 ### Q: What happens if my token expires?

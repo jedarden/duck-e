@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from datetime import datetime
 from logging import getLogger
 import openai
 from openai import OpenAI

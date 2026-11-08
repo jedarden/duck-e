@@ -39,6 +39,7 @@ from starlette.websockets import WebSocketDisconnect
 os.environ.setdefault("OPENAI_API_KEY", "test-key")  # pragma: allowlist secret
 
 import app.main as main  # noqa: E402  (import after env setup)
+import app.middleware.auth as auth  # noqa: E402
 from app.middleware.cost_protection import SessionCostTracker  # noqa: E402
 
 
@@ -188,6 +189,17 @@ async def start_session(ws):
     return asyncio.create_task(main.handle_media_stream(ws))
 
 
+def authenticated_socket(tier, monkeypatch):
+    """Return a socket bearing a signed access JWT for the selected tier."""
+    monkeypatch.setattr(auth, "JWT_SECRET_KEY", "test-jwt-secret-key")  # pragma: allowlist secret
+    token = auth.create_access_token({"sub": f"test-{tier}", "tier": tier})
+    ws = ScriptedWebSocket()
+    ws.query_params = SimpleNamespace(
+        getlist=lambda name: [token] if name == "token" else []
+    )
+    return ws
+
+
 async def wait_for_message(ws, msg_type, timeout=5.0):
     """Poll the recorded sends until the server emits msg_type."""
     loop = asyncio.get_running_loop()
@@ -271,26 +283,40 @@ async def test_circuit_breaker_at_connect_cleans_up_started_session(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tier", "tokens_each", "budget"),
+    [
+        ("free", 8_000_000, 5.0),
+        ("premium", 28_000_000, 20.0),
+        ("enterprise", 135_000_000, 100.0),
+    ],
+)
 async def test_budget_exceeded_terminates_websocket_session(
-    tracked_session, ephemeral_key, monkeypatch
+    tracked_session, ephemeral_key, monkeypatch, tier, tokens_each, budget
 ):
-    """A web_search response whose usage crosses the session budget makes
-    check_budget fail: the client receives budget_exceeded, the socket closes
-    with 1008, and tracking is cleaned up exactly once."""
+    """Tracked API usage closes each tier at its JWT-selected budget."""
+    tracked_session.config.max_total_cost_per_hour_usd = 1000.0
+    tracked_session.config.circuit_breaker_threshold_usd = 1000.0
     monkeypatch.setattr(
         main,
         "openai_client",
-        search_client(input_tokens=10_000_000, output_tokens=10_000_000),
-    )  # $1.50 input + $6.00 output = $7.50 at gpt-5.4-nano pricing
+        search_client(input_tokens=tokens_each, output_tokens=tokens_each),
+    )  # gpt-5.4-nano: $0.75 per 1M paired input/output tokens
 
-    ws = ScriptedWebSocket()
+    ws = (
+        ScriptedWebSocket()
+        if tier == "free"
+        else authenticated_socket(tier, monkeypatch)
+    )
     ws.script(tool_call())
     task = await start_session(ws)
 
     exceeded = await wait_for_message(ws, "budget_exceeded")
-    assert exceeded["session_cost"] == pytest.approx(7.5, abs=1e-6)
+    assert exceeded["session_cost"] == pytest.approx(tokens_each * 0.75 / 1_000_000)
     assert "Session budget limit exceeded" in exceeded["warnings"]
-    assert exceeded["error"].startswith("Session budget limit of $5")
+    assert exceeded["error"].startswith(f"Session budget limit of ${budget:.2f}")
+    session_id = tracked_session.lifecycle_calls["start"][0]
+    assert tracked_session.get_session_limits(session_id)["tier"] == tier
 
     await finish(ws, task)
 
@@ -409,22 +435,14 @@ async def test_circuit_breaker_trips_mid_session_and_blocks_new_sessions(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    reason=(
-        "Duration watchdog is dead code: app/main.py computes "
-        "datetime.utcnow() in duration_watchdog() but never imports datetime, "
-        "so every poll raises NameError('datetime' is not defined) which the "
-        "watchdog swallows and retries. Known since cebe66a (2026-08-20); "
-        "session duration limits are therefore not enforced. This test "
-        "passes once the import is fixed."
-    ),
-    strict=False,
+@pytest.mark.parametrize(
+    ("tier", "age_minutes", "limit_minutes"),
+    [("free", 31, 30), ("premium", 121, 120), ("enterprise", 481, 480)],
 )
 async def test_duration_watchdog_closes_session_at_limit(
-    tracked_session, ephemeral_key, monkeypatch
+    tracked_session, ephemeral_key, monkeypatch, tier, age_minutes, limit_minutes
 ):
-    """The in-handler watchdog sends session_timeout and closes 1008 once the
-    session outlives the configured duration, and cleanup runs exactly once."""
+    """The watchdog closes each tier after its JWT-selected maximum duration."""
     real_sleep = asyncio.sleep
     gate = {"armed": False}
 
@@ -439,20 +457,25 @@ async def test_duration_watchdog_closes_session_at_limit(
 
     monkeypatch.setattr(asyncio, "sleep", gated_sleep)
 
-    ws = ScriptedWebSocket()
+    ws = (
+        ScriptedWebSocket()
+        if tier == "free"
+        else authenticated_socket(tier, monkeypatch)
+    )
     task = await start_session(ws)
     try:
         await wait_for_message(ws, "ducke.init")
         session_id = tracked_session.lifecycle_calls["start"][0]
+        assert tracked_session.get_session_limits(session_id)["tier"] == tier
 
         tracked_session.session_start_times[session_id] = (
-            datetime.utcnow() - timedelta(minutes=31)
+            datetime.utcnow() - timedelta(minutes=age_minutes)
         )
         gate["armed"] = True
 
         timeout_message = await wait_for_message(ws, "session_timeout")
-        assert "maximum duration" in timeout_message["error"]
-        assert timeout_message["duration_seconds"] >= 1800
+        assert f"maximum duration of {limit_minutes} minutes" in timeout_message["error"]
+        assert timeout_message["duration_seconds"] >= limit_minutes * 60
         assert ws.closes == [{"code": 1008, "reason": "Session duration exceeded"}]
 
         await finish(ws, task)
@@ -460,8 +483,7 @@ async def test_duration_watchdog_closes_session_at_limit(
         assert tracked_session.lifecycle_calls["end"] == [session_id]
         assert tracked_session.session_costs == {}
     finally:
-        # The xfail path leaves the session parked on receive_json; unwind it
-        # so no handler task outlives the test.
+        # Unwind the input loop if an assertion fails before normal cleanup.
         ws.end_input()
         if not task.done():
             task.cancel()
