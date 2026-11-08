@@ -95,7 +95,8 @@ services:
 ```bash
 # Required
 OPENAI_API_KEY=your_openai_api_key_here
-WEATHER_API_KEY=your_weather_api_key_here
+
+# Weather uses Open-Meteo geocoding and forecast APIs; no weather key is needed.
 
 # Rate Limiting (in-memory)
 RATE_LIMIT_ENABLED=true
@@ -124,20 +125,26 @@ ENABLE_METRICS=true
 
 ### 1. Quick Start (5 minutes)
 
-```bash
-# Navigate to project
-cd /workspaces/duck-e/ducke
+Run these commands from your DUCK-E checkout:
 
+```bash
 # Configure environment
 cp .env.example .env
-nano .env  # Add your API keys
+nano .env  # Set OPENAI_API_KEY
 
 # Build and run
-docker-compose up -d
+docker compose up --build -d
 
 # Verify
 curl http://localhost:8000/status
+curl http://localhost:8000/health/openai
 ```
+
+Weather needs no separate credential: `get_current_weather` and
+`get_weather_forecast` geocode the requested city and fetch conditions from
+Open-Meteo. To check those paths without a live voice session, run
+`pytest -q tests/test_weather_tools.py` after installing the development
+requirements.
 
 ### 2. Production Deployment (2 hours)
 

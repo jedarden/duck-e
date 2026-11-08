@@ -19,24 +19,25 @@ This is the **absolute minimum** required before public deployment. Skipping any
 
 ### Prerequisites (5 minutes)
 
-```bash
-# Navigate to project
-cd /workspaces/duck-e/ducke
+Run these commands from your DUCK-E checkout:
 
+```bash
 # Verify dependencies installed
 pip install -r requirements.txt
 
 # Copy environment template
 cp .env.example .env
 
-# Edit .env with your API keys
+# Edit .env with your OpenAI API key and deployment settings
 nano .env
 ```
 
 **Required in .env:**
 - `OPENAI_API_KEY` - Your OpenAI API key
-- `WEATHER_API_KEY` - Your WeatherAPI key
 - `ALLOWED_ORIGINS` - Your domain (e.g., https://yourdomain.com)
+
+The weather tools use Open-Meteo geocoding and forecast APIs. They need no
+weather API key or provider configuration.
 
 ---
 
@@ -130,78 +131,32 @@ docker compose -f docker-compose.rate-limited.yml up -d prometheus grafana
 
 ---
 
-## Step 2: Add Input Validation (1 hour)
+## Step 2: Verify Input Validation (1 hour)
 
-### 2.1 Create Validation Models (30 min)
+### 2.1 Verify Validation Models (30 min)
 
-Create `app/models/validators.py`:
+`app/models/validators.py` already defines `LocationInput` for weather and
+`SearchQuery` for web search. Check the existing validation tests before
+deploying:
 
-```python
-from pydantic import BaseModel, Field, validator
-import re
-
-class LocationInput(BaseModel):
-    location: str = Field(..., min_length=2, max_length=100)
-
-    @validator('location')
-    def validate_location(cls, v):
-        # Only allow letters, spaces, commas, hyphens
-        if not re.match(r'^[a-zA-Z\s,\-]+$', v):
-            raise ValueError('Invalid location format')
-        return v.strip()
-
-class SearchQuery(BaseModel):
-    query: str = Field(..., min_length=3, max_length=500)
-
-    @validator('query')
-    def validate_query(cls, v):
-        # Remove potential injection attempts
-        dangerous_patterns = ['<script', 'javascript:', 'onerror=']
-        for pattern in dangerous_patterns:
-            if pattern.lower() in v.lower():
-                raise ValueError('Invalid search query')
-        return v.strip()
+```bash
+pytest -q tests/security/test_input_validation.py
 ```
 
-### 2.2 Update Weather Functions (30 min)
+### 2.2 Verify Weather Functions (30 min)
 
-In `app/main.py`, update the weather functions (lines 190-203):
+The existing `get_current_weather` and `get_weather_forecast` handlers in
+`app/main.py` validate city names with `LocationInput`. Both use Open-Meteo's
+geocoding endpoint to resolve the city, then its forecast endpoint for current
+conditions or a three-day forecast. They pass request parameters separately
+and perform blocking HTTP calls in worker threads.
 
-```python
-from app.models.validators import LocationInput
+After installing `requirements-dev.txt`, verify both paths and response
+sanitization without an external API key:
 
-@realtime_agent.register_realtime_function(
-    name="get_current_weather",
-    description="Get the current weather in a given city."
-)
-def get_current_weather(location: Annotated[str, "city"]) -> str:
-    # Validate input
-    try:
-        validated = LocationInput(location=location)
-        safe_location = validated.location
-    except Exception as e:
-        logger.warning(f"Invalid location input: {location}")
-        return "Invalid location format. Please provide a valid city name."
-
-    # Use params instead of f-string for URL
-    url = "https://api.weatherapi.com/v1/current.json"
-    params = {
-        'key': os.getenv('WEATHER_API_KEY'),
-        'q': safe_location,
-        'aqi': 'no'
-    }
-
-    try:
-        response = requests.get(url, params=params, timeout=5)
-        response.raise_for_status()
-        logger.info(f"<-- Calling get_current_weather function for {safe_location} -->")
-        return response.text
-    except Exception as e:
-        logger.error(f"Weather API error: {e}")
-        return "Unable to fetch weather data at this time."
+```bash
+pytest -q tests/test_weather_tools.py
 ```
-
-Do the same for `get_weather_forecast` function.
 
 ---
 
