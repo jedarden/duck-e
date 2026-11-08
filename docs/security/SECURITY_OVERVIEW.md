@@ -328,7 +328,8 @@ bash docs/security/verify-security.sh
 **Access Grafana:**
 ```bash
 docker-compose -f docker-compose.rate-limited.yml up -d
-# Grafana: http://localhost:3000 (admin/admin)
+# Grafana: http://localhost:3000 (deployment host only)
+# Login with GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD from .env
 # Prometheus: http://localhost:9090
 ```
 

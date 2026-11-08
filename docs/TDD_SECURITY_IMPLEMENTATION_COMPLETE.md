@@ -553,7 +553,9 @@ locust -f tests/load_test.py --host=https://yourdomain.com
 
 ```bash
 # Access Grafana
-http://localhost:3000 (admin/admin)
+http://localhost:3000 (deployment host only)
+# Sign in with GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD from .env.
+# The Compose stack has no default credentials.
 
 # Import dashboards from docs/security/rate-limiting-guide.md
 

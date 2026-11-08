@@ -23,7 +23,9 @@ services:
 
     # Environment configuration
     env_file:
-      - .env
+      # Resolve the repository's canonical environment file when this stack
+      # is started from the repository root or from docs/security.
+      - ../../.env
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONDONTWRITEBYTECODE=1
@@ -213,8 +215,11 @@ services:
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
 
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      # Credentials must be supplied explicitly; there is no default login.
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER in .env}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=false
       - GF_SERVER_ROOT_URL=https://grafana.ducke.app
       - GF_SECURITY_COOKIE_SECURE=true
       - GF_SECURITY_STRICT_TRANSPORT_SECURITY=true

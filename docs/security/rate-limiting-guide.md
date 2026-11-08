@@ -146,7 +146,10 @@ The middleware exposes these metrics at `/metrics`:
 
 ### Grafana Dashboards
 
-Access Grafana at `http://localhost:3000` (default credentials: admin/admin).
+Access Grafana at `http://localhost:3000` from the deployment host. Before
+starting the stack, set `GRAFANA_ADMIN_USER` and
+`GRAFANA_ADMIN_PASSWORD` in `.env`; the Compose deployment has no default
+credentials and binds Grafana to loopback only.
 
 **Pre-configured panels:**
 - Rate limit violations over time

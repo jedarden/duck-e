@@ -4,6 +4,8 @@
 
 **Live demo:** [ducke-demo.ardenone.com](https://ducke-demo.ardenone.com)
 
+![DUCK-E web UI — a dark-themed chat page with a status indicator, a "Start Conversation" button, voice and push-to-talk controls, a live transcript, and a session cost display](docs/images/duck-e.png)
+
 ## How it works
 
 ```
@@ -56,24 +58,52 @@ Memory is silently disabled in local dev when neither authentication method is a
 - CORS origin whitelist
 - Security headers middleware (HSTS, CSP, X-Frame-Options, etc.)
 
+## Before you start
+
+- **An OpenAI API key with [Realtime API access](https://platform.openai.com/docs/guides/realtime).** DUCK-E cannot hold a conversation without one. Voice sessions are billed by OpenAI; the per-session and per-hour cost caps described below are enforced server-side, but usage still costs real money.
+- **Docker with the Compose plugin**, or **Python 3.12** if you prefer running directly on the host.
+- **A browser with a microphone** (Chrome, Edge, or Firefox) and permission to use it. Microphone access is only granted on secure origins — `http://localhost` counts as one, so local use needs no TLS.
+
 ## Quick start
 
 ### Docker Compose (builds locally)
 
 ```bash
+git clone https://github.com/jedarden/duck-e.git
+cd duck-e
 cp .env.example .env
 # Add OPENAI_API_KEY to .env, then:
 docker compose up --build -d
 ```
 
-Open `http://localhost:8000` and start talking.
+The compose file publishes host port 8000 by default; set `DUCKE_PORT` to override it (e.g. `DUCKE_PORT=8080 docker compose up -d`).
+
+Check that it came up:
+
+```bash
+curl http://localhost:8000/status
+# {"message":"WebRTC DUCK-E Server is running!","version":"0.2.141"}
+
+curl http://localhost:8000/health/openai
+# {"status":"ok",...}  — your key works
+# {"status":"error",...} — the key is missing or rejected; fix .env and restart
+```
+
+Then open `http://localhost:8000`, allow the microphone when the browser prompts, and start talking.
 
 ### Local development
 
+Requires Python 3.12.
+
 ```bash
+git clone https://github.com/jedarden/duck-e.git
+cd duck-e
+python3.12 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-# create .env with OPENAI_API_KEY=sk-...
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers
+cp .env.example .env
+# Add OPENAI_API_KEY to .env, then (--env-file loads it):
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers --env-file .env
 ```
 
 ## Environment variables
@@ -97,7 +127,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers
 | `COST_PROTECTION_CIRCUIT_BREAKER_THRESHOLD_USD` | No | `100.0` | Kill-switch threshold |
 | `COST_PROTECTION_MAX_SESSION_DURATION_MINUTES` | No | `30` | Maximum session length |
 | `ALLOWED_ORIGINS` | No | — | CORS origin whitelist (comma-separated) |
-| `GRAFANA_PASSWORD` | No | — | For the hardened docker-compose stack |
+| `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` | No | — | Required operator credentials for the monitoring Compose stacks |
 
 ## API endpoints
 

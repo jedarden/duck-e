@@ -72,7 +72,8 @@ services:
     image: prom/prometheus:v2.48.0
     container_name: duck-e-prometheus
     ports:
-      - "9090:9090"
+      # Monitoring is for local operators; do not publish it to all interfaces.
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -90,11 +91,14 @@ services:
     image: grafana/grafana:10.2.2
     container_name: duck-e-grafana
     ports:
-      - "3000:3000"
+      # Monitoring is for local operators; do not publish it to all interfaces.
+      - "127.0.0.1:3000:3000"
     env_file:
       - .env
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      # Compose fails before startup when either operator credential is absent.
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:?Set GRAFANA_ADMIN_USER in .env}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}
       - GF_INSTALL_PLUGINS=redis-datasource
     volumes:
       - grafana-data:/var/lib/grafana

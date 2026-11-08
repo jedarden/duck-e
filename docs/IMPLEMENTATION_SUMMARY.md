@@ -250,7 +250,10 @@ Access at `http://localhost:9090`
 - `budget_exceeded_total{session_id}`
 
 ### Grafana Dashboards
-Access at `http://localhost:3000` (admin/admin)
+Access at `http://localhost:3000` from the deployment host. Configure the
+required `GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` values in `.env`
+before starting the stack; there is no default login and the port is bound to
+loopback.
 
 Pre-configured panels:
 - Rate limit violations timeline

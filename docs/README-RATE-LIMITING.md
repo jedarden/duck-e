@@ -104,7 +104,12 @@ docker-compose -f docker-compose.rate-limited.yml up -d
 
 ### Grafana Dashboards
 
-Access at `http://localhost:3000` (admin/admin):
+Access at `http://localhost:3000` from the deployment host. Set
+`GRAFANA_ADMIN_USER` and `GRAFANA_ADMIN_PASSWORD` in `.env` before starting
+the stack; use those values to sign in. The monitoring port is bound to
+loopback and is not exposed to the network.
+
+The dashboard includes:
 - Rate limit violations over time
 - API cost trends
 - Active sessions

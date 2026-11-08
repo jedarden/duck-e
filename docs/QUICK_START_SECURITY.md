@@ -115,12 +115,14 @@ curl http://localhost:8000/metrics | grep rate_limit
 ### 1.4 Configure Monitoring (30 min)
 
 ```bash
+# Before starting, set GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD in .env.
+# The stack refuses to start if either value is missing.
 # Start Prometheus and Grafana
-docker-compose -f docker-compose.rate-limited.yml up -d prometheus grafana
+docker compose -f docker-compose.rate-limited.yml up -d prometheus grafana
 
-# Access Grafana
+# Access Grafana from the deployment host only; the port is bound to loopback.
 # URL: http://localhost:3000
-# Login: admin/admin
+# Login: use the GRAFANA_ADMIN_USER and GRAFANA_ADMIN_PASSWORD values from .env.
 
 # Import dashboard
 # Use the JSON from docs/security/rate-limiting-guide.md
