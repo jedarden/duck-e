@@ -2,12 +2,12 @@
 
 ## Overview
 
-DUCK-E implements **optional JWT-based authentication** with tiered access levels. Anonymous users can access the API with free-tier limits, while authenticated users receive higher rate limits and session budgets based on their subscription tier.
+DUCK-E implements **optional JWT-based authentication** with tiered access levels. On optional-auth HTTP routes and the `/session` WebSocket, a request with no credential uses the free tier. Any supplied malformed, invalid, expired, revoked, or unsupported credential fails authentication; it never silently falls back to the free tier. Auth-required routes such as `/auth/me` return HTTP 401 when the credential is missing too.
 
 ## Authentication Design Principles
 
-1. **Optional Authentication**: API works without authentication (free tier)
-2. **Anonymous Access**: Requests without a credential use free-tier access; supplied invalid credentials are rejected
+1. **Optional Authentication**: Optional-auth routes and `/session` work without a credential at free-tier limits
+2. **Anonymous Access**: Only requests with no credential use free-tier access; supplied invalid credentials are rejected
 3. **No Breaking Changes**: Existing anonymous users continue working
 4. **Tier-Based Access**: Premium/Enterprise tiers unlock higher limits
 
@@ -15,11 +15,11 @@ DUCK-E implements **optional JWT-based authentication** with tiered access level
 
 ### Free Tier (Anonymous/Default)
 
-**No authentication required**
+**No authentication required for optional-auth routes and `/session`**. `/auth/me` requires a valid access token.
 
-```http
-GET /status
-# No Authorization header needed
+```javascript
+// Browser: no token query parameter means an anonymous free-tier session.
+const ws = new WebSocket('wss://api.ducke.io/session');
 ```
 
 **Limits:**
@@ -34,7 +34,7 @@ GET /status
 
 ```http
 GET /auth/me
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Authorization: Bearer YOUR_JWT_TOKEN
 ```
 
 **Limits:**
@@ -49,7 +49,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ```http
 GET /auth/me
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+Authorization: Bearer YOUR_JWT_TOKEN
 ```
 
 **Limits:**
@@ -60,10 +60,12 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ## JWT Token Contract
 
-An access JWT must be signed with the configured algorithm and contain a
-non-empty `sub` and a numeric `exp` (Unix NumericDate). The token is invalid
-once `exp` is reached; there is no expiry grace period. If present,
-`token_type` must be `access` (refresh tokens are never API credentials).
+An access JWT must have a valid signature using the configured algorithm, a
+non-empty string `sub`, and a numeric, unexpired `exp` (Unix NumericDate).
+The token is invalid once `exp` is reached; there is no expiry grace period.
+If present, `token_type` must be `access` (refresh tokens are never API
+credentials). A signed legacy token without `token_type` is accepted as an
+access token.
 
 `tier` must be exactly `free`, `premium`, or `enterprise`. A signed legacy
 token with no `tier` claim is treated as `premium`; an explicit unknown or
@@ -125,8 +127,11 @@ token = jwt.encode(payload, secret_key, algorithm="HS256")
 
 #### HTTP Requests
 
+Send an access token in exactly one `Authorization: Bearer <access JWT>`
+header. Omit the header entirely for anonymous access on optional-auth routes.
+
 ```bash
-# Anonymous (free tier)
+# Public health check (no tier admission)
 curl https://api.ducke.io/status
 
 # Validate an authenticated access token and read its tier
@@ -153,9 +158,11 @@ const ws = new WebSocket(url);
 
 Non-browser WebSocket clients may instead send the standard
 `Authorization: Bearer <access JWT>` handshake header. A connection must use
-one transport only; sending both is rejected. A missing credential is an
-anonymous free-tier session. A supplied invalid or expired JWT closes the
-WebSocket with policy-violation code `1008` before a session starts.
+one transport only. Repeating the `token` query parameter or sending both a
+query token and a Bearer header is rejected. A missing credential is an
+anonymous free-tier session. A supplied malformed, invalid, expired, or
+unsupported credential closes the WebSocket with policy-violation code `1008`
+before a session starts.
 
 ### 3. Token Refresh
 
@@ -183,18 +190,24 @@ curl -X POST https://your-auth-service.com/auth/refresh \
 
 ### 401 Unauthorized
 
-**Invalid or expired token** - Rejected. Anonymous free-tier access applies only when no credential is supplied.
+For example, an expired access token with an otherwise valid signature sent to
+`/auth/me` returns:
 
-```json
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer
+Content-Type: application/json
+
 {
   "detail": "Token has expired"
 }
 ```
 
-The HTTP response also includes `WWW-Authenticate: Bearer`. Public endpoints
-without a token remain available anonymously. If a token is supplied to an
-optional-auth endpoint, malformed, expired, revoked, non-access, or
-unsupported-tier tokens return 401 instead of silently downgrading.
+Other invalid credentials can have a different `detail` message but also
+return HTTP 401 with `WWW-Authenticate: Bearer`. Optional-auth routes without
+a credential use the free tier; `/auth/me` returns 401 without one. A supplied
+malformed Bearer header or invalid, expired, revoked, non-access, or
+unsupported-tier token returns 401 instead of silently downgrading.
 
 ### 429 Rate Limit Exceeded
 
@@ -244,13 +257,13 @@ class DuckEClient:
         )
         return response.json()
 
-# Anonymous usage (free tier)
+# Public health check; WebSocket tier limits do not apply to /status.
 client = DuckEClient()
-print(client.check_status())  # 5 conn/min limit
+print(client.check_status())
 
-# Authenticated usage (premium tier)
+# The Authorization header is sent when a token is present.
 premium_client = DuckEClient(token="your_jwt_token")
-print(premium_client.check_status())  # 20 conn/min limit
+print(premium_client.check_status())
 ```
 
 ### JavaScript Client
@@ -288,8 +301,8 @@ class DuckEClient {
 }
 
 // Usage
-const freeClient = new DuckEClient();  // 5 conn/min
-const premiumClient = new DuckEClient('your_jwt_token');  // 20 conn/min
+const freeClient = new DuckEClient();  // /session uses free-tier limits
+const premiumClient = new DuckEClient('your_jwt_token');  // /session uses the JWT tier
 ```
 
 ## Security Best Practices
@@ -467,9 +480,8 @@ curl https://api.ducke.io/auth/me \
   -H "Authorization: Bearer $EXPIRED_TOKEN"
 ```
 
-For a route that requires authentication (such as `/auth/me`), the expired
-token returns 401. Public routes without a token continue to use free-tier
-access.
+The expired token returns 401. Optional-auth routes and `/session` without a
+credential continue to use free-tier access; `/auth/me` requires a token.
 
 ### Automated Testing
 
@@ -485,7 +497,9 @@ See `/tests/security/test_authentication.py` for comprehensive test suite coveri
 
 ### Q: What happens if I don't provide a token?
 
-**A**: You get free tier access automatically. No errors, service works normally with free tier limits (5 conn/min, $5 budget).
+**A**: Optional-auth routes and `/session` use the free tier when you supply no
+credential (5 WebSocket connections/minute, $5 session budget). `/auth/me`
+requires a valid access token and returns 401 without one.
 
 ### Q: What happens if my token expires?
 
