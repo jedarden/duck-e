@@ -197,6 +197,51 @@ def test_websocket_rejects_credentials_that_http_rejects(client, transport, clai
     assert disconnect.value.reason == "Invalid or expired JWT"
 
 
+@pytest.mark.parametrize(
+    ("transport", "token"),
+    [
+        ("query", "not-a-jwt"),
+        ("bearer", "not-a-jwt"),
+        (
+            "query",
+            jwt.encode(
+                valid_claims(),
+                "different-signing-secret",
+                algorithm="HS256",
+            ),
+        ),
+        (
+            "bearer",
+            jwt.encode(
+                valid_claims(),
+                "different-signing-secret",
+                algorithm="HS256",
+            ),
+        ),
+    ],
+    ids=[
+        "query-malformed",
+        "bearer-malformed",
+        "query-wrong-signature",
+        "bearer-wrong-signature",
+    ],
+)
+def test_websocket_rejects_malformed_or_wrong_signature_credentials(
+    client, transport, token
+):
+    path = f"/session?token={token}" if transport == "query" else "/session"
+    headers = {"Origin": "http://localhost:8000"}
+    if transport == "bearer":
+        headers["Authorization"] = f"Bearer {token}"
+
+    with client.websocket_connect(path, headers=headers) as websocket:
+        with pytest.raises(WebSocketDisconnect) as disconnect:
+            websocket.receive_text()
+
+    assert disconnect.value.code == 1008
+    assert disconnect.value.reason == "Invalid or expired JWT"
+
+
 def test_auth_me_rejects_malformed_jwt_with_401(client):
     response = client.get(
         "/auth/me", headers={"Authorization": "Bearer not-a-jwt"}
