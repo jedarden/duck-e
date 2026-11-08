@@ -188,7 +188,13 @@ class TestWebFetchIntegration:
 
         websocket = MagicMock()
         websocket.headers = {"origin": "http://localhost:8000", "host": "localhost:8000"}
+        websocket.client = None
+        websocket.query_params = MagicMock()
+        websocket.query_params.getlist.return_value = []
+        websocket.scope = {}
         websocket.url = "ws://localhost/session"
+        websocket.close = AsyncMock()
+        websocket.send_json = AsyncMock()
         await handle_media_stream(websocket)
 
         for call in fake_session.register_tool.call_args_list:
