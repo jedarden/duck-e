@@ -115,7 +115,9 @@ def extract_bearer_token(authorization_header: Optional[str]) -> Optional[str]:
 
 def extract_websocket_token(
     authorization_header: Optional[str],
-    query_token: Optional[str]
+    query_token: Optional[str],
+    *,
+    authorization_header_count: Optional[int] = None,
 ) -> Optional[str]:
     """Extract a WebSocket JWT from one supported transport only.
 
@@ -123,6 +125,11 @@ def extract_websocket_token(
     not allow setting an Authorization header. Other clients should use the
     standard Bearer header. Supplying both is ambiguous and rejected.
     """
+    if authorization_header_count is None:
+        authorization_header_count = 1 if authorization_header is not None else 0
+    if authorization_header_count > 1:
+        raise _unauthorized("Only one Authorization header is allowed")
+
     bearer_token = extract_bearer_token(authorization_header)
     if bearer_token is not None and query_token is not None:
         raise _unauthorized("Use one JWT transport per WebSocket connection")

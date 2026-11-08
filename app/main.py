@@ -539,9 +539,17 @@ async def handle_media_stream(websocket: WebSocket):
     try:
         if len(query_tokens) > 1:
             raise HTTPException(status_code=401, detail="Only one JWT query parameter is allowed")
+        try:
+            authorization_headers = headers.getlist("authorization")
+        except AttributeError:
+            authorization_header = headers.get("authorization")
+            authorization_headers = (
+                [authorization_header] if authorization_header is not None else []
+            )
         jwt_token = extract_websocket_token(
-            headers.get("authorization"),
-            query_tokens[0] if query_tokens else None
+            authorization_headers[0] if authorization_headers else None,
+            query_tokens[0] if query_tokens else None,
+            authorization_header_count=len(authorization_headers),
         )
         jwt_payload = validate_access_token(jwt_token) if jwt_token is not None else None
     except HTTPException:

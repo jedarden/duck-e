@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 from fastapi.testclient import TestClient
 from jose import jwt
+from starlette.datastructures import Headers
 from starlette.websockets import WebSocketDisconnect
 
 
@@ -156,6 +157,44 @@ def test_auth_me_rejects_invalid_access_tokens_with_401(client, invalid_claim):
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
     assert "detail" in response.json()
+
+
+@pytest.mark.parametrize(
+    ("transport", "claims"),
+    [
+        ("query", valid_claims(exp=datetime.now(timezone.utc) - timedelta(seconds=1))),
+        ("bearer", valid_claims(exp=datetime.now(timezone.utc) - timedelta(seconds=1))),
+        ("query", valid_claims(token_type="refresh")),
+        ("bearer", valid_claims(token_type="refresh")),
+        ("query", valid_claims(tier="ultra")),
+        ("bearer", valid_claims(tier="ultra")),
+        ("query", valid_claims(sub="")),
+        ("bearer", valid_claims(sub="")),
+    ],
+    ids=[
+        "query-expired",
+        "bearer-expired",
+        "query-refresh-token",
+        "bearer-refresh-token",
+        "query-unsupported-tier",
+        "bearer-unsupported-tier",
+        "query-empty-subject",
+        "bearer-empty-subject",
+    ],
+)
+def test_websocket_rejects_credentials_that_http_rejects(client, transport, claims):
+    token = make_token(**claims)
+    path = f"/session?token={token}" if transport == "query" else "/session"
+    headers = {"Origin": "http://localhost:8000"}
+    if transport == "bearer":
+        headers["Authorization"] = f"Bearer {token}"
+
+    with client.websocket_connect(path, headers=headers) as websocket:
+        with pytest.raises(WebSocketDisconnect) as disconnect:
+            websocket.receive_text()
+
+    assert disconnect.value.code == 1008
+    assert disconnect.value.reason == "Invalid or expired JWT"
 
 
 def test_auth_me_rejects_malformed_jwt_with_401(client):
@@ -377,6 +416,51 @@ def test_websocket_rejects_ambiguous_header_and_query_transports(client):
         extract_websocket_token("Bearer one", "two")
 
     assert error.value.status_code == 401
+
+
+def test_websocket_rejects_duplicate_authorization_headers():
+    from app.middleware.auth import extract_websocket_token
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as error:
+        extract_websocket_token(
+            "Bearer one",
+            None,
+            authorization_header_count=2,
+        )
+
+    assert error.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_websocket_handler_rejects_duplicate_authorization_headers(monkeypatch):
+    import app.main as main
+
+    websocket = Mock()
+    websocket.headers = Headers(
+        raw=[
+            (b"origin", b"http://localhost:8000"),
+            (b"authorization", b"Bearer first"),
+            (b"authorization", b"Bearer second"),
+        ]
+    )
+    websocket.client = None
+    websocket.query_params = Mock()
+    websocket.query_params.getlist.return_value = []
+    websocket.scope = {}
+    websocket.close = AsyncMock()
+    monkeypatch.setattr(
+        main.ws_security,
+        "validate_connection",
+        AsyncMock(return_value=True),
+    )
+
+    await main.handle_media_stream(websocket)
+
+    websocket.close.assert_awaited_once_with(
+        code=1008,
+        reason="Invalid or expired JWT",
+    )
 
 
 def test_missing_origin_log_does_not_include_authorization_value(caplog):
