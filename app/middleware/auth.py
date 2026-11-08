@@ -295,7 +295,7 @@ def validate_token(token: str) -> Dict[str, Any]:
             detail="Token has expired",
             headers={"WWW-Authenticate": "Bearer"}
         )
-    except (jwt.JWTError, TypeError, ValueError) as e:
+    except (jwt.JWTError, TypeError, ValueError, OverflowError) as e:
         logger.warning(f"Invalid token: {e}")
         raise _unauthorized("Invalid token signature or format")
 

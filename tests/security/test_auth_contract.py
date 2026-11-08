@@ -32,6 +32,24 @@ def client(monkeypatch):
     return TestClient(app)
 
 
+@pytest.fixture
+def tier_client(monkeypatch):
+    """Exercise the optional-auth tier resolver through an HTTP request."""
+    from fastapi import FastAPI, Request
+    from app.middleware import auth
+
+    monkeypatch.setattr(auth, "JWT_SECRET_KEY", TEST_SECRET)
+    monkeypatch.setattr(auth, "_redis_client", None)
+
+    app = FastAPI()
+
+    @app.get("/tier")
+    async def get_tier(request: Request):
+        return {"tier": auth.get_user_tier(request)}
+
+    return TestClient(app)
+
+
 def valid_claims(**overrides):
     claims = {
         "sub": "auth-contract-user",
@@ -41,10 +59,6 @@ def valid_claims(**overrides):
     }
     claims.update(overrides)
     return claims
-
-
-claims_without_expiration = valid_claims()
-claims_without_expiration.pop("exp")
 
 
 def test_auth_me_accepts_valid_bearer_access_token(client):
@@ -66,17 +80,75 @@ def test_missing_http_credential_uses_free_tier():
     assert get_user_tier(request) == "free"
 
 
+def test_optional_http_request_without_credentials_uses_free_tier(tier_client):
+    response = tier_client.get("/tier")
+
+    assert response.status_code == 200
+    assert response.json() == {"tier": "free"}
+
+
+@pytest.mark.parametrize("tier", ["free", "premium", "enterprise"])
+def test_auth_me_accepts_supported_tier_claims(client, tier):
+    token = make_token(**valid_claims(tier=tier))
+
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["user_info"]["tier"] == tier
+
+
+def test_auth_me_maps_legacy_token_without_tier_to_premium(client):
+    claims = valid_claims()
+    claims.pop("tier")
+    token = make_token(**claims)
+
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["user_info"]["tier"] == "premium"
+
+
+def test_auth_me_accepts_legacy_access_token_without_token_type(client):
+    claims = valid_claims()
+    claims.pop("token_type")
+    token = make_token(**claims)
+
+    response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize(
-    "claims",
+    "invalid_claim",
     [
-        claims_without_expiration,
-        valid_claims(exp=datetime.now(timezone.utc) - timedelta(seconds=1)),
-        valid_claims(tier="ultra"),
-        valid_claims(token_type="refresh"),
+        "missing-expiration",
+        "expired",
+        "numeric-string-expiration",
+        "infinite-expiration",
+        "missing-subject",
+        "empty-subject",
+        "unsupported-tier",
+        "refresh-token",
     ],
-    ids=["missing-expiration", "expired", "unsupported-tier", "refresh-token"],
 )
-def test_auth_me_rejects_invalid_access_tokens_with_401(client, claims):
+def test_auth_me_rejects_invalid_access_tokens_with_401(client, invalid_claim):
+    claims = valid_claims()
+    if invalid_claim == "missing-expiration":
+        claims.pop("exp")
+    elif invalid_claim == "expired":
+        claims["exp"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    elif invalid_claim == "numeric-string-expiration":
+        claims["exp"] = str(int(datetime.now(timezone.utc).timestamp()) + 300)
+    elif invalid_claim == "infinite-expiration":
+        claims["exp"] = float("inf")
+    elif invalid_claim == "missing-subject":
+        claims.pop("sub")
+    elif invalid_claim == "empty-subject":
+        claims["sub"] = "  "
+    elif invalid_claim == "unsupported-tier":
+        claims["tier"] = "ultra"
+    elif invalid_claim == "refresh-token":
+        claims["token_type"] = "refresh"
     token = make_token(**claims)
 
     response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
@@ -84,6 +156,37 @@ def test_auth_me_rejects_invalid_access_tokens_with_401(client, claims):
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
     assert "detail" in response.json()
+
+
+def test_auth_me_rejects_malformed_jwt_with_401(client):
+    response = client.get(
+        "/auth/me", headers={"Authorization": "Bearer not-a-jwt"}
+    )
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize(
+    "invalid_claim",
+    ["expired", "refresh-token", "unsupported-tier"],
+)
+def test_optional_http_request_rejects_invalid_credentials_instead_of_downgrading(
+    tier_client, invalid_claim
+):
+    claims = valid_claims()
+    if invalid_claim == "expired":
+        claims["exp"] = datetime.now(timezone.utc) - timedelta(seconds=1)
+    elif invalid_claim == "refresh-token":
+        claims["token_type"] = "refresh"
+    else:
+        claims["tier"] = "ultra"
+    token = make_token(**claims)
+
+    response = tier_client.get("/tier", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
 
 
 def test_auth_me_rejects_malformed_bearer_header_with_401(client):
