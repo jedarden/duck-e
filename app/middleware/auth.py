@@ -19,7 +19,16 @@ import hashlib
 import redis
 from uuid import uuid4
 
-from app.models.user import UserTier, TIER_CONFIGURATIONS, TokenData, TierLimits
+from app.models.user import TokenData
+from app.tier_policy import (
+    InvalidSubjectClaim,
+    InvalidTierClaim,
+    TIER_CONFIGURATIONS,
+    UserTier,
+    parse_tier,
+    resolve_jwt_subject,
+    resolve_jwt_tier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -243,8 +252,9 @@ def validate_token(token: str) -> Dict[str, Any]:
 
         # Require a subject and an explicit expiry. python-jose checks an
         # existing exp claim, but does not require one by default.
-        subject = payload.get("sub")
-        if not isinstance(subject, str) or not subject.strip():
+        try:
+            payload["sub"] = resolve_jwt_subject(payload)
+        except InvalidSubjectClaim:
             logger.warning("Token missing 'sub' claim")
             raise _unauthorized("Invalid token: missing subject claim")
 
@@ -365,14 +375,9 @@ def get_user_tier_from_token(token_data: Dict[str, Any]) -> UserTier:
     Returns:
         UserTier enum value
     """
-    # Keep compatibility with previously-issued signed tokens that omitted
-    # tier; explicit unknown values are invalid and must not gain premium access.
-    tier_str = token_data.get("tier", UserTier.PREMIUM.value)
-
-    # Validate tier value
     try:
-        return UserTier(tier_str)
-    except (TypeError, ValueError):
+        return resolve_jwt_tier(token_data)
+    except InvalidTierClaim:
         logger.warning("Invalid tier claim in token")
         raise _unauthorized("Invalid token: unsupported tier")
 
@@ -388,7 +393,7 @@ def get_tier_limits(tier: str) -> Dict[str, Any]:
         Dict with rate_limit, session_budget, session_timeout
     """
     try:
-        tier_enum = UserTier(tier)
+        tier_enum = parse_tier(tier)
         limits = TIER_CONFIGURATIONS[tier_enum]
 
         return {
@@ -397,7 +402,7 @@ def get_tier_limits(tier: str) -> Dict[str, Any]:
             "session_timeout": limits.session_timeout,
             "websocket_connections": limits.websocket_connections
         }
-    except (ValueError, KeyError):
+    except (InvalidTierClaim, KeyError):
         # Invalid tier, return free tier limits
         logger.warning(f"Invalid tier requested: {tier}, returning free tier")
         limits = TIER_CONFIGURATIONS[UserTier.FREE]

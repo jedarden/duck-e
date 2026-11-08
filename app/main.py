@@ -39,6 +39,7 @@ from app.middleware.auth import (
     get_user_tier_from_token,
     validate_access_token,
 )
+from app.tier_policy import resolve_jwt_subject
 from app.middleware.proxy_identity import (
     get_trusted_proxy_identity,
     parse_trusted_proxy_sources,
@@ -550,10 +551,11 @@ async def handle_media_stream(websocket: WebSocket):
 
     if jwt_payload is not None:
         session_tier = get_user_tier_from_token(jwt_payload).value
+        jwt_subject = resolve_jwt_subject(jwt_payload)
         jwt_user_info = {
             "email": jwt_payload.get("email"),
             "name": jwt_payload.get("name"),
-            "sub": jwt_payload["sub"],
+            "sub": jwt_subject,
             "tier": session_tier,
             "auth_method": jwt_payload.get("auth_method")
         }
@@ -584,7 +586,7 @@ async def handle_media_stream(websocket: WebSocket):
     # JWT subjects are the stable admission identity. Proxy identities and
     # anonymous clients are isolated by their forwarded identity or source IP.
     if jwt_payload is not None:
-        admission_identity = f"jwt:{jwt_payload['sub']}"
+        admission_identity = f"jwt:{jwt_subject}"
     elif user_identity:
         admission_identity = f"proxy:{user_identity}"
     else:

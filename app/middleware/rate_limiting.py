@@ -22,7 +22,13 @@ import logging
 from pydantic import BaseModel, Field
 from prometheus_client import Counter, Histogram
 
-from app.models.user import TIER_CONFIGURATIONS, UserTier
+from app.tier_policy import (
+    InvalidTierClaim,
+    TIER_CONFIGURATIONS,
+    UserTier,
+    WEBSOCKET_WINDOW_SECONDS,
+    parse_tier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -164,16 +170,13 @@ def get_rate_limit_for_user_tier(request: Request, endpoint: str) -> str:
     """
     tier = get_user_tier_from_request(request)
 
-    # Import tier configuration
     try:
-        from app.models.user import TIER_CONFIGURATIONS, UserTier
-
-        tier_enum = UserTier(tier)
+        tier_enum = parse_tier(tier)
         tier_limits = TIER_CONFIGURATIONS[tier_enum]
 
         # Return tier-specific rate limit
         return tier_limits.rate_limit
-    except (ImportError, ValueError, KeyError) as e:
+    except (InvalidTierClaim, KeyError) as e:
         logger.warning(f"Error getting tier limits: {e}, using default")
         # Fallback to configured endpoint limit
         return get_rate_limit_for_endpoint(endpoint)
@@ -206,7 +209,7 @@ class WebSocketConnectionLimiter:
     move this state to a shared store as one atomic operation.
     """
 
-    WINDOW_SECONDS = 60.0
+    WINDOW_SECONDS = WEBSOCKET_WINDOW_SECONDS
 
     def __init__(self, clock: Any = monotonic):
         self._clock = clock
@@ -218,8 +221,8 @@ class WebSocketConnectionLimiter:
     def _tier_limits(tier: str) -> tuple[UserTier, Any]:
         """Return a validated tier and its limits, failing closed to free."""
         try:
-            tier_enum = UserTier(tier)
-        except (TypeError, ValueError):
+            tier_enum = parse_tier(tier)
+        except InvalidTierClaim:
             tier_enum = UserTier.FREE
         return tier_enum, TIER_CONFIGURATIONS[tier_enum]
 
@@ -249,7 +252,7 @@ class WebSocketConnectionLimiter:
             # identity that repeatedly collides with a full session quota
             # still consumes request budget, so the concurrency response
             # cannot be used to bypass per-minute rate limiting.
-            rate_limit_count = int(limits.rate_limit.split("/", 1)[0])
+            rate_limit_count = limits.websocket_attempts_per_minute
             if len(attempts) >= rate_limit_count:
                 retry_after = max(1, ceil(attempts[0] + self.WINDOW_SECONDS - now))
                 return WebSocketAdmission(

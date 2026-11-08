@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 import json
 import os
 
-from app.models.user import TIER_CONFIGURATIONS, UserTier
+from app.tier_policy import InvalidTierClaim, TIER_CONFIGURATIONS, parse_tier
 
 # Optional redis import - only needed if REDIS_URL is configured
 try:
@@ -195,8 +195,8 @@ class SessionCostTracker:
         """
         tier = self.session_tiers.get(session_id)
         try:
-            tier_enum = UserTier(tier) if tier is not None else None
-        except (TypeError, ValueError):
+            tier_enum = parse_tier(tier) if tier is not None else None
+        except InvalidTierClaim:
             tier_enum = None
 
         if tier_enum is not None:
