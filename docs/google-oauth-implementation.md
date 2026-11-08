@@ -128,9 +128,14 @@ if _oauth_available:
 **WebSocket Authentication (lines 382-441):**
 
 1. Extract JWT token from `Authorization` header or query parameter
-2. Validate token and extract user info using `get_user_info_from_token()`
-3. Fallback to proxy headers (`x-forwarded-email`, `x-forwarded-user`)
-4. Determine `user_identity` (JWT email > forwarded email > forwarded user)
+2. Validate the access token (`validate_access_token()`) and collect its identity claims
+3. Read proxy headers (`x-forwarded-email`, `x-forwarded-user`) only when the
+   socket peer matches `TRUSTED_PROXY_NETWORKS` (`get_trusted_proxy_identity()`)
+4. Resolve one identity through `resolve_user_identity()` in
+   `app/middleware/proxy_identity.py` — the single precedence point:
+   JWT identity (OAuth-issued claims included; usable `email` claim, else
+   `sub`) > forwarded email > forwarded user > anonymous. Claims must be
+   non-blank strings; unusable claims are skipped deterministically
 
 **Memory System Integration (lines 444-447):**
 

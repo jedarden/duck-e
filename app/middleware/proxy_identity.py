@@ -88,18 +88,51 @@ def get_trusted_proxy_identity(
     )
 
 
+def _usable_identity(value: object) -> str | None:
+    """Return identity text only for a non-blank string claim, trimmed.
+
+    Identity values key per-user memory, so they must be plain strings:
+    non-string claims (a malformed signed token can carry any JSON type)
+    and blank values are skipped instead of crashing the store or keying
+    memory on whitespace.
+    """
+    if not isinstance(value, str):
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
 def resolve_user_identity(
     jwt_user_info: dict | None,
     proxy_user: str | None,
     proxy_email: str | None,
 ) -> tuple[str | None, str | None]:
-    """Resolve memory identity and display name, preferring signed JWT claims."""
+    """Resolve the memory identity and display name from identity inputs.
+
+    This is the single precedence point for authentication identity:
+
+    1. An authenticated JWT wins over any forwarded identity. OAuth-issued
+       tokens (``auth_method: google_oauth``) carry identity claims and
+       resolve through this same path — they are not special-cased. Within
+       a JWT, a usable ``email`` claim precedes the ``sub`` claim.
+    2. Without a JWT identity, trusted proxy ``x-forwarded-email`` precedes
+       ``x-forwarded-user``. Only values that passed the trusted-peer check
+       reach this function; untrusted headers never do.
+    3. With neither, the caller is anonymous and receives ``(None, None)``.
+
+    Resolution is deterministic when identity inputs conflict or when a JWT
+    has no email: every claim must be a non-blank string, otherwise it is
+    skipped and resolution falls through to the next source in the order
+    above. The same inputs always produce the same identity.
+    """
     if jwt_user_info:
-        identity = jwt_user_info.get("email") or jwt_user_info.get("sub")
+        identity = _usable_identity(
+            jwt_user_info.get("email")
+        ) or _usable_identity(jwt_user_info.get("sub"))
         if identity:
-            return identity, jwt_user_info.get("name") or identity
-    if proxy_email:
-        return proxy_email, proxy_email
-    if proxy_user:
-        return proxy_user, proxy_user
+            display = _usable_identity(jwt_user_info.get("name")) or identity
+            return identity, display
+    identity = _usable_identity(proxy_email) or _usable_identity(proxy_user)
+    if identity:
+        return identity, identity
     return None, None

@@ -120,6 +120,93 @@ def test_jwt_oauth_identity_precedes_trusted_proxy_identity():
     )
 
 
+def test_jwt_without_email_resolves_to_its_subject():
+    # OAuth-issued JWTs always carry an email claim; locally minted tokens
+    # may not. Either way resolution must land on the signed subject.
+    jwt_user = {"sub": "stable-subject-123", "name": "Token User"}
+
+    assert resolve_user_identity(jwt_user, None, None) == (
+        "stable-subject-123",
+        "Token User",
+    )
+
+
+@pytest.mark.parametrize(
+    "unusable_email",
+    [None, "", "   ", "\t", 12345, True, {"spoofed": True}, ["a@b.example"]],
+    ids=[
+        "missing",
+        "empty",
+        "whitespace",
+        "tab",
+        "numeric",
+        "boolean",
+        "object",
+        "list",
+    ],
+)
+def test_unusable_jwt_email_claims_fall_through_to_the_subject(unusable_email):
+    jwt_user = {"sub": "subject-fallback", "email": unusable_email}
+
+    assert resolve_user_identity(jwt_user, "proxy-user", "proxy@example.com") == (
+        "subject-fallback",
+        "subject-fallback",
+    )
+
+
+def test_jwt_with_no_usable_identity_claims_falls_back_to_trusted_proxy():
+    # A signed token that names nobody cannot claim the proxy identity's
+    # slot, but resolution must still be deterministic: the trusted proxy
+    # identity is used, proxy email before proxy user.
+    jwt_user = {"email": "", "sub": "   ", "name": None}
+
+    assert resolve_user_identity(jwt_user, "proxy-user", "proxy@example.com") == (
+        "proxy@example.com",
+        "proxy@example.com",
+    )
+    assert resolve_user_identity(jwt_user, "proxy-user", None) == (
+        "proxy-user",
+        "proxy-user",
+    )
+    assert resolve_user_identity(jwt_user, None, None) == (None, None)
+
+
+def test_subject_only_jwt_beats_conflicting_trusted_proxy_identity():
+    jwt_user = {"sub": "jwt-subject-wins"}
+
+    assert resolve_user_identity(jwt_user, "proxy-user", "proxy@example.com") == (
+        "jwt-subject-wins",
+        "jwt-subject-wins",
+    )
+
+
+def test_jwt_display_name_must_be_a_usable_string():
+    jwt_user = {"sub": "subject-1", "email": "user@example.com", "name": {"x": 1}}
+
+    assert resolve_user_identity(jwt_user, None, None) == (
+        "user@example.com",
+        "user@example.com",
+    )
+
+
+def test_untrusted_peer_headers_never_reach_the_resolver():
+    # A client that is not a configured proxy cannot gain an identity by
+    # sending forwarded headers: nothing reaches the resolver, so there is
+    # no untrusted-header fallback and the connection resolves anonymous.
+    spoofed_headers = {
+        "x-forwarded-user": "attacker-chosen",
+        "x-forwarded-email": "attacker@example.com",
+    }
+
+    proxy_user, proxy_email = get_trusted_proxy_identity(
+        spoofed_headers,
+        "198.51.100.7",
+        parse_trusted_proxy_sources("10.20.0.0/16"),
+    )
+    assert (proxy_user, proxy_email) == (None, None)
+    assert resolve_user_identity(None, proxy_user, proxy_email) == (None, None)
+
+
 def test_proxy_email_precedes_proxy_user_and_names_are_not_trusted():
     headers = {
         "x-forwarded-user": "proxy-user",
