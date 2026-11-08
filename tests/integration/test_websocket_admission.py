@@ -89,12 +89,12 @@ class BlockingRealtimeSession:
     """Fake provider session whose run method can hold an admitted slot."""
 
     instances = []
-    release = None
     mode = "block"
 
     def __init__(self, **kwargs):
         self.handlers = {}
         self.started = asyncio.Event()
+        self.release_event = asyncio.Event()
         type(self).instances.append(self)
 
     def register_tool(self, name, description, handler, parameters):
@@ -111,7 +111,13 @@ class BlockingRealtimeSession:
             raise WebSocketDisconnect()
         if self.mode == "exception":
             raise RuntimeError("provider failed")
-        await self.release.wait()
+        await self.release_event.wait()
+
+    @classmethod
+    def release_all(cls):
+        """Release every fake provider session currently holding a slot."""
+        for instance in cls.instances:
+            instance.release_event.set()
 
 
 @pytest.fixture
@@ -145,7 +151,6 @@ def admission_harness(monkeypatch):
 
     monkeypatch.setattr(main, "UserMemoryStore", FakeMemoryStore)
     BlockingRealtimeSession.instances = []
-    BlockingRealtimeSession.release = asyncio.Event()
     BlockingRealtimeSession.mode = "block"
     monkeypatch.setattr(main, "RealtimeSession", BlockingRealtimeSession)
     monkeypatch.setattr(auth, "JWT_SECRET_KEY", "integration-jwt-secret")
@@ -174,10 +179,49 @@ async def run_handler(websocket):
     return asyncio.create_task(main.handle_media_stream(websocket))
 
 
+def assert_limit_rejection(
+    websocket,
+    *,
+    tier,
+    subject,
+    reason,
+    rate_limit,
+    concurrent_limit,
+    current_connections,
+):
+    """Assert a rejection with diagnostics for the tier and subject under test."""
+    context = (
+        f"tier={tier} subject={subject} rate_limit={rate_limit}/minute "
+        f"concurrent_limit={concurrent_limit}"
+    )
+    assert websocket.sent, f"{context}: admission response was not sent"
+    payload = websocket.sent[0]
+    assert payload["reason"] == reason, f"{context}: payload={payload}"
+    assert payload["tier"] == tier, f"{context}: payload={payload}"
+    assert payload["rate_limit"] == f"{rate_limit}/minute", (
+        f"{context}: payload={payload}"
+    )
+    assert payload["max_concurrent_sessions"] == concurrent_limit, (
+        f"{context}: payload={payload}"
+    )
+    assert payload["current_connections"] == current_connections, (
+        f"{context}: payload={payload}"
+    )
+
+
+TIER_LIMIT_CASES = [
+    pytest.param("free", 5, 1, id="free-5-per-minute-1-concurrent"),
+    pytest.param("premium", 20, 5, id="premium-20-per-minute-5-concurrent"),
+    pytest.param(
+        "enterprise", 100, 20, id="enterprise-100-per-minute-20-concurrent"
+    ),
+]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("tier", "rate_budget", "concurrent_cap"),
-    [("free", 5, 1), ("premium", 20, 5), ("enterprise", 100, 20)],
+    TIER_LIMIT_CASES,
 )
 async def test_real_handler_enforces_tier_admission_and_rolling_budget(
     admission_harness, tier, rate_budget, concurrent_cap
@@ -195,7 +239,15 @@ async def test_real_handler_enforces_tier_admission_and_rolling_budget(
     concurrent_rejection = AdmissionWebSocket(token)
     rejection_task = await run_handler(concurrent_rejection)
     await rejection_task
-    assert concurrent_rejection.sent[0]["reason"] == "concurrent_limit"
+    assert_limit_rejection(
+        concurrent_rejection,
+        tier=tier,
+        subject=subject,
+        reason="concurrent_limit",
+        rate_limit=rate_budget,
+        concurrent_limit=concurrent_cap,
+        current_connections=concurrent_cap,
+    )
     assert concurrent_rejection.closes == [
         {"code": 1008, "reason": "WebSocket connection limit exceeded"}
     ]
@@ -206,45 +258,200 @@ async def test_real_handler_enforces_tier_admission_and_rolling_budget(
     for _ in range(rate_budget - concurrent_cap - 1):
         rejected = AdmissionWebSocket(token)
         await (await run_handler(rejected))
-        assert rejected.sent[0]["reason"] == "concurrent_limit"
+        assert_limit_rejection(
+            rejected,
+            tier=tier,
+            subject=subject,
+            reason="concurrent_limit",
+            rate_limit=rate_budget,
+            concurrent_limit=concurrent_cap,
+            current_connections=concurrent_cap,
+        )
 
     rate_rejection = AdmissionWebSocket(token)
     await (await run_handler(rate_rejection))
-    assert rate_rejection.sent[0]["reason"] == "rate_limit"
-    assert rate_rejection.sent[0]["tier"] == tier
-    assert rate_rejection.sent[0]["rate_limit"] == f"{rate_budget}/minute"
+    assert_limit_rejection(
+        rate_rejection,
+        tier=tier,
+        subject=subject,
+        reason="rate_limit",
+        rate_limit=rate_budget,
+        concurrent_limit=concurrent_cap,
+        current_connections=concurrent_cap,
+    )
 
-    BlockingRealtimeSession.release.set()
+    BlockingRealtimeSession.release_all()
     await asyncio.gather(*live_tasks)
     assert main.websocket_connection_limiter.active_connections(f"jwt:{subject}") == 0
 
 
 @pytest.mark.asyncio
-async def test_real_handler_isolates_sessions_by_jwt_subject(
+async def test_real_handler_subjects_cannot_consume_or_release_one_anothers_quota(
     admission_harness,
 ):
+    first_subject = "stable-subject"
+    second_subject = "different-subject"
     first = await run_handler(
-        AdmissionWebSocket(token_for("stable-subject", "free", "first@example.com"))
+        AdmissionWebSocket(token_for(first_subject, "free", "first@example.com"))
     )
     await wait_until(lambda: len(admission_harness.started) == 1)
+    first_session = BlockingRealtimeSession.instances[0]
 
     same_subject = AdmissionWebSocket(
-        token_for("stable-subject", "free", "renamed@example.com")
+        token_for(first_subject, "free", "renamed@example.com")
     )
     await (await run_handler(same_subject))
-    assert same_subject.sent[0]["reason"] == "concurrent_limit"
+    assert_limit_rejection(
+        same_subject,
+        tier="free",
+        subject=first_subject,
+        reason="concurrent_limit",
+        rate_limit=5,
+        concurrent_limit=1,
+        current_connections=1,
+    )
 
     different_subject = AdmissionWebSocket(
-        token_for("different-subject", "free", "renamed@example.com")
+        token_for(second_subject, "free", "renamed@example.com")
     )
     other = await run_handler(different_subject)
     await wait_until(lambda: len(admission_harness.started) == 2)
     assert different_subject.sent == []
+    second_session = BlockingRealtimeSession.instances[1]
 
-    BlockingRealtimeSession.release.set()
-    await asyncio.gather(first, other)
-    assert main.websocket_connection_limiter.active_connections("jwt:stable-subject") == 0
-    assert main.websocket_connection_limiter.active_connections("jwt:different-subject") == 0
+    # Releasing the first subject must not release the second subject's slot.
+    first_session.release_event.set()
+    await first
+    assert main.websocket_connection_limiter.active_connections(
+        f"jwt:{first_subject}"
+    ) == 0
+    assert main.websocket_connection_limiter.active_connections(
+        f"jwt:{second_subject}"
+    ) == 1
+
+    second_still_full = AdmissionWebSocket(
+        token_for(second_subject, "free", "another@example.com")
+    )
+    await (await run_handler(second_still_full))
+    assert_limit_rejection(
+        second_still_full,
+        tier="free",
+        subject=second_subject,
+        reason="concurrent_limit",
+        rate_limit=5,
+        concurrent_limit=1,
+        current_connections=1,
+    )
+
+    # The first subject can use its released slot without borrowing the
+    # second subject's quota, while the second session remains live.
+    first_again = AdmissionWebSocket(token_for(first_subject, "free"))
+    first_again_task = await run_handler(first_again)
+    await wait_until(lambda: len(admission_harness.started) == 3)
+    first_again_session = BlockingRealtimeSession.instances[2]
+    first_again_session.release_event.set()
+    await first_again_task
+    assert main.websocket_connection_limiter.active_connections(
+        f"jwt:{second_subject}"
+    ) == 1
+
+    second_session.release_event.set()
+    await other
+    assert main.websocket_connection_limiter.active_connections(
+        f"jwt:{first_subject}"
+    ) == 0
+    assert main.websocket_connection_limiter.active_connections(
+        f"jwt:{second_subject}"
+    ) == 0
+
+
+@pytest.mark.asyncio
+async def test_real_handler_downgrade_applies_lower_rolling_limit_immediately(
+    admission_harness,
+):
+    subject = "rolling-downgrade-subject"
+    BlockingRealtimeSession.mode = "return"
+
+    # Six attempts fit enterprise's 100/minute budget but exceed free's
+    # 5/minute budget. Each completed session must release its concurrent slot
+    # before the next attempt so this isolates rolling-limit downgrade logic.
+    for attempt in range(6):
+        websocket = AdmissionWebSocket(token_for(subject, "enterprise"))
+        await (await run_handler(websocket))
+        assert websocket.sent == [], (
+            f"tier=enterprise subject={subject} attempt={attempt + 1} "
+            "unexpected rejection"
+        )
+
+    downgraded = AdmissionWebSocket(token_for(subject, "free"))
+    await (await run_handler(downgraded))
+    assert_limit_rejection(
+        downgraded,
+        tier="free",
+        subject=subject,
+        reason="rate_limit",
+        rate_limit=5,
+        concurrent_limit=1,
+        current_connections=0,
+    )
+    assert main.websocket_connection_limiter.active_connections(f"jwt:{subject}") == 0
+
+
+@pytest.mark.asyncio
+async def test_real_handler_downgrade_applies_lower_concurrent_limit_immediately(
+    admission_harness,
+):
+    subject = "concurrent-downgrade-subject"
+    premium = await run_handler(AdmissionWebSocket(token_for(subject, "premium")))
+    await wait_until(lambda: len(admission_harness.started) == 1)
+    premium_session = BlockingRealtimeSession.instances[0]
+
+    downgraded = AdmissionWebSocket(token_for(subject, "free"))
+    await (await run_handler(downgraded))
+    assert_limit_rejection(
+        downgraded,
+        tier="free",
+        subject=subject,
+        reason="concurrent_limit",
+        rate_limit=5,
+        concurrent_limit=1,
+        current_connections=1,
+    )
+    assert main.websocket_connection_limiter.active_connections(f"jwt:{subject}") == 1
+
+    # Releasing the pre-downgrade session removes the old active slot. The
+    # lower-tier subject can then connect immediately, without stale allowance
+    # or leaked capacity from the higher-tier session.
+    premium_session.release_event.set()
+    await premium
+    assert main.websocket_connection_limiter.active_connections(f"jwt:{subject}") == 0
+
+    after_cleanup = await run_handler(AdmissionWebSocket(token_for(subject, "free")))
+    await wait_until(lambda: len(admission_harness.started) == 2)
+    after_cleanup_session = BlockingRealtimeSession.instances[1]
+    after_cleanup_session.release_event.set()
+    await after_cleanup
+    assert main.websocket_connection_limiter.active_connections(f"jwt:{subject}") == 0
+
+
+@pytest.mark.asyncio
+async def test_real_handler_cleanup_before_downgrade_does_not_leak_capacity(
+    admission_harness,
+):
+    subject = "cleanup-before-downgrade-subject"
+    premium = await run_handler(AdmissionWebSocket(token_for(subject, "premium")))
+    await wait_until(lambda: len(admission_harness.started) == 1)
+    premium_session = BlockingRealtimeSession.instances[0]
+    premium_session.release_event.set()
+    await premium
+    assert main.websocket_connection_limiter.active_connections(f"jwt:{subject}") == 0
+
+    free = await run_handler(AdmissionWebSocket(token_for(subject, "free")))
+    await wait_until(lambda: len(admission_harness.started) == 2)
+    free_session = BlockingRealtimeSession.instances[1]
+    free_session.release_event.set()
+    await free
+    assert main.websocket_connection_limiter.active_connections(f"jwt:{subject}") == 0
 
 
 @pytest.mark.asyncio
@@ -264,7 +471,7 @@ async def test_real_handler_releases_admission_on_every_exit_path(
             await task
     else:
         if mode == "block":
-            BlockingRealtimeSession.release.set()
+            BlockingRealtimeSession.release_all()
         await task
 
     assert main.websocket_connection_limiter.active_connections(f"jwt:{subject}") == 0
