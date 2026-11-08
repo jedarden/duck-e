@@ -5,12 +5,13 @@ services:
       dockerfile: dockerfile
     container_name: duck-e
     ports:
-      - "8000:8000"
+      - "${DUCKE_PORT:-8000}:8000"
     env_file:
       - .env
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/status"]
+      # python:3.12-slim has no curl; use the stdlib instead
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/status', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3

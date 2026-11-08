@@ -51,7 +51,7 @@ Memory is silently disabled in local dev when neither authentication method is a
 - Client-side live cost display derived from token counts in `response.done` events
 
 ### Security
-- Ephemeral key flow — real `OPENAI_API_KEY` never sent to the browser
+- Ephemeral key flow — the real API key is never sent to the browser
 - Per-IP rate limiting via slowapi
 - SSRF protection on `web_fetch` (resolves hostnames, rejects private/loopback ranges)
 - Input validation via Pydantic models (`LocationInput`, `SearchQuery`, `FetchUrl`)
@@ -60,7 +60,7 @@ Memory is silently disabled in local dev when neither authentication method is a
 
 ## Before you start
 
-- **An OpenAI API key with [Realtime API access](https://platform.openai.com/docs/guides/realtime).** DUCK-E cannot hold a conversation without one. Voice sessions are billed by OpenAI; the per-session and per-hour cost caps described below are enforced server-side, but usage still costs real money.
+- **An `OPENAI_API_KEY` with [Realtime API access](https://platform.openai.com/docs/guides/realtime).** DUCK-E cannot hold a conversation without one. Voice sessions are billed by OpenAI; the per-session and per-hour cost caps described below are enforced server-side, but usage still costs real money.
 - **Docker with the Compose plugin**, or **Python 3.12** if you prefer running directly on the host.
 - **A browser with a microphone** (Chrome, Edge, or Firefox) and permission to use it. Microphone access is only granted on secure origins — `http://localhost` counts as one, so local use needs no TLS.
 
@@ -69,14 +69,17 @@ Memory is silently disabled in local dev when neither authentication method is a
 ### Docker Compose (builds locally)
 
 ```bash
-git clone https://github.com/jedarden/duck-e.git
-cd duck-e
+git clone https://github.com/jedarden/duck-e.git && cd duck-e
 cp .env.example .env
 # Add OPENAI_API_KEY to .env, then:
 docker compose up --build -d
 ```
 
 The compose file publishes host port 8000 by default; set `DUCKE_PORT` to override it (e.g. `DUCKE_PORT=8080 docker compose up -d`).
+
+`curl http://localhost:8000/status` returns the running message and version.
+`curl http://localhost:8000/health/openai` returns `status: ok` with a valid
+key, or `status: error` without one.
 
 Check that it came up:
 
@@ -96,8 +99,7 @@ Then open `http://localhost:8000`, allow the microphone when the browser prompts
 Requires Python 3.12.
 
 ```bash
-git clone https://github.com/jedarden/duck-e.git
-cd duck-e
+git clone https://github.com/jedarden/duck-e.git && cd duck-e
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt

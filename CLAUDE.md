@@ -1,5 +1,10 @@
 # DUCK-E - Coding Environment
 
+Agent guidance now lives in [AGENTS.md](AGENTS.md) — project overview, run and
+test commands, and house rules (no GitHub Actions, work on `main`, stage exact
+paths, no `:latest` image tags). This file keeps the deeper gotchas and
+deployment context.
+
 ## Project Overview
 
 DUCK-E is a real-time voice assistant built on FastAPI + OpenAI Realtime API. It provides voice-first interaction with tools for weather, web search, web fetch, memory, and voice changing.
@@ -35,15 +40,16 @@ pip install -r requirements.txt
 # Set required env vars in .env:
 # OPENAI_API_KEY=sk-...
 
-# Run dev server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Run dev server (--no-proxy-headers keeps proxy headers from being
+# consumed by uvicorn before the app's trusted-proxy validation)
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers
 ```
 
 ### Docker
 
 ```bash
-docker build -t duck-e:latest .
-docker run -p 8000:8000 -e OPENAI_API_KEY=... duck-e:latest
+docker build -t duck-e:dev .
+docker run --env-file .env -p 8000:8000 duck-e:dev
 ```
 
 ## Important Patterns
