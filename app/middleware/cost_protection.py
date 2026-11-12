@@ -509,7 +509,13 @@ def get_cost_tracker() -> SessionCostTracker:
                 )
                 logger.info("Cost tracker using Redis for distributed tracking")
             except Exception as e:
-                logger.error(f"Failed to initialize Redis for cost tracking: {e}")
+                # Log the exception type only: redis-py's URL parser raises
+                # errors whose text echoes parts of REDIS_URL, and str(e)
+                # must never reach the logs.
+                logger.error(
+                    "Failed to initialize Redis for cost tracking: %s",
+                    type(e).__name__
+                )
         elif config.redis_url and not REDIS_AVAILABLE:
             logger.warning("REDIS_URL configured but redis package not installed, using in-memory storage")
 

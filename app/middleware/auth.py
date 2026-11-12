@@ -87,7 +87,13 @@ if REDIS_URL:
         )
         logger.info("Redis initialized for token revocation")
     except Exception as e:
-        logger.warning(f"Redis initialization failed, revocation disabled: {e}")
+        # Log the exception type only: redis-py's URL parser raises errors
+        # whose text echoes parts of REDIS_URL (e.g. the password fragment),
+        # and str(e) must never reach the logs.
+        logger.warning(
+            "Redis initialization failed, revocation disabled: %s",
+            type(e).__name__
+        )
 
 
 # HTTPBearer for optional authentication
