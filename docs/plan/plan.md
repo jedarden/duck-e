@@ -112,6 +112,14 @@ introducing new stateful components:
    survives individual duck-e pod restarts; correctness no longer depends on
    the pod never restarting mid-window.
 
+   *Update 2026-11-12:* the `REDIS_URL` sealed into `ducke-secret` never
+   worked — its password never matched Valkey and its unescaped `/` broke URL
+   parsing, so the in-memory fallback ran the whole time (ducke-f83d245c).
+   duck-e now connects as its own Valkey ACL user `ducke` (db 7), password at
+   OpenBao `secret/ardenone-cluster/ducke/valkey-acl`, delivered by the
+   `ducke-valkey` ExternalSecret. `ducke-secret` itself was retired with the
+   other SealedSecrets (ducke-f2e5baa4).
+
 2. **User memory facts → a dedicated PVC.** Add a small
    (1Gi, `storageClassName: nfs-synology`) `PersistentVolumeClaim`, mount it
    at `/data/memory` in `ducke-deployment.yml`. No app code change — `memory.py`
