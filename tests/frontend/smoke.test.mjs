@@ -49,7 +49,9 @@ test('page: a Realtime API error event is added to the transcript as a system me
 test('page: toggleConnection() reaches the connected state', async () => {
   const { browser, ws } = await connectPage();
   assert.equal(ws.url.startsWith('ws://test.invalid/session'), true);
-  assert.equal(browser.document.getElementById('status-text').textContent, 'Connected - DUCK-E is listening');
+  // The status line shows the live conversation state; idle and unmuted it
+  // reads "Listening" instead of the old fixed sentence.
+  assert.equal(browser.document.getElementById('status-text').textContent, 'Listening');
   assert.equal(browser.document.getElementById('button-text').textContent, 'Disconnect');
   assert.equal(browser.evaluate('connectionStatus'), true);
 });

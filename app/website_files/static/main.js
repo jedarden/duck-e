@@ -7,6 +7,10 @@ let streamingResponse = null; // Track current streaming response { index, conte
 let currentTurnUserTranscript = ''; // Last user utterance for memory extraction
 let currentTurnAssistantTranscript = ''; // Current assistant response for memory extraction
 let lastServerNotice = ''; // Last backend refusal/timeout/budget/error sentence
+let isTalkButtonHeld = false; // PTT talk button (or spacebar) is currently held
+let sawOutputAudioBuffer = false; // This session emitted WebRTC output_audio_buffer events
+let currentConversationState = null; // { state, detail } shown in the status line
+const baseDocumentTitle = document.title; // Original tab title, restored on disconnect
 
 // OAuth state
 let oauthToken = null; // JWT access token
@@ -482,6 +486,7 @@ const toggleMute = () => {
   isMuted = !isMuted;
   updateMuteUI(isMuted);
   saveMuteState(isMuted);
+  refreshIdleState();
   console.log(`Mute state toggled to: ${isMuted}`);
 
   // Apply immediately if connected
@@ -497,6 +502,7 @@ const togglePushToTalk = () => {
   isPushToTalk = !isPushToTalk;
   updatePTTUI(isPushToTalk);
   savePushToTalkState(isPushToTalk);
+  refreshIdleState();
   console.log(`Push-to-talk mode toggled to: ${isPushToTalk}`);
 
   // Apply immediately if connected
@@ -520,6 +526,8 @@ const startTalking = () => {
   if (pttBtn) pttBtn.classList.add('active');
   if (pttBtnInline) pttBtnInline.classList.add('active');
   setMicrophoneEnabled(true);
+  isTalkButtonHeld = true;
+  refreshIdleState();
   console.log('PTT: Started talking');
 };
 
@@ -531,6 +539,8 @@ const stopTalking = () => {
   if (pttBtn) pttBtn.classList.remove('active');
   if (pttBtnInline) pttBtnInline.classList.remove('active');
   setMicrophoneEnabled(false);
+  isTalkButtonHeld = false;
+  refreshIdleState();
   console.log('PTT: Stopped talking');
 };
 
@@ -834,6 +844,17 @@ const handleWebRTCMessage = (event) => {
     // event now has { data: string, message: object } from our modified ducke client
     const data = event.message || (typeof event.data === 'string' ? JSON.parse(event.data) : event.data);
 
+    // Live conversation state for the status line and tab title.
+    if (connectionStatus) {
+      if (data.type === 'output_audio_buffer.started') {
+        // Remember that this session emits the WebRTC-only audio-buffer
+        // events: response.done then must not end the speaking state while
+        // the audio is still playing.
+        sawOutputAudioBuffer = true;
+      }
+      applyConversationState(nextConversationState(currentConversationState, data, conversationFlags()));
+    }
+
     // Perf telemetry hooks
     if (data.type === 'input_audio_buffer.speech_started') {
       perfReset();
@@ -1068,6 +1089,131 @@ const handleWebRTCMessage = (event) => {
   }
 };
 
+// --- Live conversation state (status line + tab title) ---
+
+// Labels for the conversation states. The tool state is detail-dependent and
+// formatted through formatToolName in conversationStateLabel.
+const CONVERSATION_STATE_LABELS = {
+  listening: 'Listening',
+  hearing: 'Hearing you…',
+  thinking: 'Thinking…',
+  speaking: 'Speaking',
+  muted: 'Microphone muted',
+  'ptt-idle': 'Hold to talk',
+};
+
+const conversationStateLabel = (state, detail) => (
+  state === 'tool'
+    ? `Using ${formatToolName(detail || '')}…`
+    : CONVERSATION_STATE_LABELS[state] || ''
+);
+
+// The state while nothing is happening: muted wins, then PTT waiting for the
+// talk button, otherwise passively listening.
+const idleConversationState = (flags) => {
+  if (flags.isMuted) return { state: 'muted', detail: null };
+  if (flags.isPushToTalk && !flags.talkButtonHeld) return { state: 'ptt-idle', detail: null };
+  return { state: 'listening', detail: null };
+};
+
+// Pure transition: given the current conversation state, a Realtime API (or
+// DUCK-E backend) event and the current mic/PTT flags, return the next
+// { state, detail }. No DOM access here — setConversationState renders it.
+//
+// output_audio_buffer.* are WebRTC-only and were not observed in the live-API
+// verification (docs/research/realtime-api-verified-2026-11-12.md), so
+// response.done also returns to idle when the session never emits them.
+const nextConversationState = (current, event, flags) => {
+  switch (event.type) {
+    // Internal marker: recompute which idle variant applies (mute/PTT changes).
+    case 'ducke.refresh_idle':
+      return idleConversationState(flags);
+    case 'input_audio_buffer.speech_started':
+      return { state: 'hearing', detail: null };
+    case 'input_audio_buffer.speech_stopped':
+      return { state: 'thinking', detail: null };
+    case 'response.created':
+      // A tool turn keeps showing the tool until its result arrives; the
+      // follow-up response.created for it is not a new "thinking" phase.
+      if (current && current.state === 'tool') return current;
+      return { state: 'thinking', detail: null };
+    case 'response.function_call_arguments.done':
+      return { state: 'tool', detail: event.name };
+    case 'conversation.item.create':
+      if (event.item?.type === 'function_call_output') return { state: 'thinking', detail: null };
+      return current || idleConversationState(flags);
+    case 'response.output_audio_transcript.delta':
+    case 'response.audio_transcript.delta':
+    case 'output_audio_buffer.started':
+      return { state: 'speaking', detail: null };
+    case 'output_audio_buffer.stopped':
+    case 'output_audio_buffer.cleared':
+      return idleConversationState(flags);
+    case 'response.done': {
+      const output = event.response?.output;
+      const onlyFunctionCalls = Array.isArray(output) && output.length > 0
+        && output.every((item) => item?.type === 'function_call');
+      // Tool-only responses keep the tool state (the result is still coming),
+      // and when audio-buffer events are in play the audio is still playing —
+      // output_audio_buffer.stopped ends the speaking state instead.
+      if (onlyFunctionCalls || flags.sawOutputAudioBuffer) {
+        return current || idleConversationState(flags);
+      }
+      return idleConversationState(flags);
+    }
+    case 'response.cancelled':
+      return idleConversationState(flags);
+    default:
+      return current || idleConversationState(flags);
+  }
+};
+
+// Snapshot of the mic/PTT flags the transition function reads.
+const conversationFlags = () => ({
+  isMuted,
+  isPushToTalk,
+  talkButtonHeld: isTalkButtonHeld,
+  sawOutputAudioBuffer,
+});
+
+// Render a conversation state into both status lines, both indicators and the
+// tab title. Only called while connected; updateUI("disconnected") restores
+// the original texts and title.
+const setConversationState = (state, detail) => {
+  const label = conversationStateLabel(state, detail);
+  const statusText = document.getElementById('status-text');
+  const statusTextInline = document.getElementById('status-text-inline');
+  const statusIndicator = document.getElementById('status-indicator');
+  const statusIndicatorInline = document.getElementById('status-indicator-inline');
+  if (statusText) statusText.textContent = label;
+  if (statusTextInline) statusTextInline.textContent = label;
+  if (statusIndicator) statusIndicator.dataset.state = state;
+  if (statusIndicatorInline) statusIndicatorInline.dataset.state = state;
+  document.title = `DUCK-E — ${label}`;
+};
+
+// Apply the next state unless it is identical to what is already shown.
+const applyConversationState = (next) => {
+  const prev = currentConversationState;
+  if (prev && prev.state === next.state && prev.detail === next.detail) return;
+  currentConversationState = next;
+  setConversationState(next.state, next.detail);
+};
+
+// Recompute the idle state after a control change (mute, PTT, talk button).
+// Mid-conversation states (hearing/thinking/tool/speaking) are left alone —
+// muting the mic does not stop DUCK-E from speaking.
+const refreshIdleState = () => {
+  if (!connectionStatus) return;
+  const idleStates = ['listening', 'muted', 'ptt-idle'];
+  if (currentConversationState && !idleStates.includes(currentConversationState.state)) return;
+  applyConversationState(nextConversationState(
+    currentConversationState,
+    { type: 'ducke.refresh_idle' },
+    conversationFlags(),
+  ));
+};
+
 // Function to update the UI elements based on connection status.
 const updateUI = (status) => {
   // Main controls
@@ -1091,6 +1237,11 @@ const updateUI = (status) => {
   if (statusIndicatorInline) statusIndicatorInline.classList.remove("connecting", "connected", "disconnected");
   if (toggleButtonInline) toggleButtonInline.classList.remove("connected");
 
+  // Connecting/disconnected are not conversation states: drop any state marker
+  // so the indicator falls back to the status-class colours.
+  if (status !== "connected") delete statusIndicator.dataset.state;
+  if (status !== "connected" && statusIndicatorInline) delete statusIndicatorInline.dataset.state;
+
   if (status === "connecting") {
     statusIndicator.classList.add("connecting");
     statusText.textContent = "Connecting to DUCK-E...";
@@ -1108,14 +1259,17 @@ const updateUI = (status) => {
     if (pttControlsInline) pttControlsInline.style.display = 'none';
   } else if (status === "connected") {
     statusIndicator.classList.add("connected");
-    statusText.textContent = "Connected - DUCK-E is listening";
+    // The status line shows the live conversation state from here on,
+    // starting at the idle state (muted / hold to talk / listening).
+    sawOutputAudioBuffer = false;
+    currentConversationState = null;
+    applyConversationState(nextConversationState(null, { type: 'ducke.refresh_idle' }, conversationFlags()));
     buttonText.textContent = "Disconnect";
     toggleButton.classList.add("connected");
     toggleButton.disabled = false;
     muteBtn.disabled = false;
     // Inline
     if (statusIndicatorInline) statusIndicatorInline.classList.add("connected");
-    if (statusTextInline) statusTextInline.textContent = "Connected";
     if (buttonTextInline) buttonTextInline.textContent = "Disconnect";
     if (toggleButtonInline) {
       toggleButtonInline.classList.add("connected");
@@ -1133,6 +1287,9 @@ const updateUI = (status) => {
   } else if (status === "disconnected") {
     statusIndicator.classList.add("disconnected");
     statusText.textContent = "Ready to Connect";
+    // Leave the conversation state behind: restore the original tab title.
+    currentConversationState = null;
+    document.title = baseDocumentTitle;
     buttonText.textContent = "Connect";
     toggleButton.disabled = false;
     muteBtn.disabled = false;

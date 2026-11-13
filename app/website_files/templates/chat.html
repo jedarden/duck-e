@@ -305,6 +305,50 @@
             color: var(--text-muted);
         }
 
+        /* Live conversation states (dataset.state, set by main.js). These come
+           after the status-class rules above so the state colour wins while
+           connected. */
+        .status-indicator[data-state="listening"] {
+            background: var(--success);
+            color: var(--success);
+        }
+
+        .status-indicator[data-state="hearing"] {
+            background: var(--primary-light);
+            color: var(--primary-light);
+        }
+
+        .status-indicator[data-state="thinking"] {
+            background: var(--warning);
+            color: var(--warning);
+        }
+
+        .status-indicator[data-state="tool"] {
+            background: var(--primary-dark);
+            color: var(--primary-dark);
+        }
+
+        .status-indicator[data-state="speaking"] {
+            background: var(--primary);
+            color: var(--primary);
+        }
+
+        .status-indicator[data-state="muted"] {
+            background: var(--danger);
+            color: var(--danger);
+        }
+
+        .status-indicator[data-state="ptt-idle"] {
+            background: var(--text-muted);
+            color: var(--text-muted);
+        }
+
+        /* Hearing and speaking pulse faster than the idle breathing pulse. */
+        .status-indicator[data-state="hearing"]::before,
+        .status-indicator[data-state="speaking"]::before {
+            animation: pulse 1.2s ease-in-out infinite;
+        }
+
         .status-text {
             font-size: 1.125rem;
             font-weight: 600;
@@ -1541,6 +1585,12 @@
                 animation-duration: 0.01ms !important;
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.01ms !important;
+            }
+
+            /* Conversation-state pulse off entirely */
+            .status-indicator[data-state="hearing"]::before,
+            .status-indicator[data-state="speaking"]::before {
+                animation: none;
             }
         }
     </style>

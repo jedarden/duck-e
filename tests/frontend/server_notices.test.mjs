@@ -145,5 +145,7 @@ test('a new connection after a notice shows the normal connecting and connected 
   const dc = browser.peers.at(-1).channels[0];
   dc.open();
   await retry;
-  assert.equal(browser.document.getElementById('status-text').textContent, 'Connected - DUCK-E is listening');
+  // The status line shows the live conversation state; idle and unmuted it
+  // reads "Listening" (see conversation_state.test.mjs).
+  assert.equal(browser.document.getElementById('status-text').textContent, 'Listening');
 });
