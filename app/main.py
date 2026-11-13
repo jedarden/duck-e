@@ -21,6 +21,7 @@ import uuid
 from app.config import get_realtime_config, get_swarm_config, validate_config
 from app.memory import UserMemoryStore, FactCategory, FactSource
 from app.realtime_session import RealtimeSession, transcription_language_for
+from app.prompts import build_base_system_message
 
 # Import security middleware
 from app.middleware import (
@@ -740,15 +741,7 @@ async def handle_media_stream(websocket: WebSocket):
         first_config = realtime_llm_config["config_list"][0]
 
         # Build system message, optionally augmented with user identity and memories
-        base_system_message = (
-            f"You are an AI voice assistant named DUCK-E (pronounced ducky). "
-            f"You can answer questions about weather (make sure to localize units based on the location), "
-            f"or search the web for current information. \n\n"
-            f"IMPORTANT: Before calling web_search, you MUST first speak to the user saying something like "
-            f"'Let me search for that' or 'Searching the web for [topic]'. Only after announcing the search "
-            f"should you call the web_search function. Keep responses brief, two short sentences maximum. "
-            f"The user's browser is configured for this language <language>{safe_language}</language>"
-        )
+        base_system_message = build_base_system_message(safe_language)
 
         if memory_store is not None:
             user_display = user_display_name or user_identity
