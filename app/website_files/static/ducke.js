@@ -226,6 +226,7 @@ var ducke = (() => {
     microphone;
     ws;
     pc;
+    dc;
     onDisconnect;
     onMessage;
     constructor(duckeSocketUrl, microphone) {
@@ -233,12 +234,14 @@ var ducke = (() => {
       this.microphone = microphone;
       this.ws = null;
       this.pc = null;
+      this.dc = null;
       this.onDisconnect = () => {
         console.log("WebRTC disconnected");
       };
       this.onMessage = null;
     }
     async close() {
+      this.dc = null;
       if (this.microphone) {
         this.microphone?.stop();
         this.microphone = void 0;
@@ -254,8 +257,16 @@ var ducke = (() => {
         pc.close();
       }
     }
+    sendEvent(obj) {
+      if (!this.dc || this.dc.readyState !== "open") {
+        return false;
+      }
+      this.dc.send(JSON.stringify(obj));
+      return true;
+    }
     async connect() {
-      let dc = null;
+      this.dc = null;
+      let connectionOpened = false;
       let audioEl = null; // Reused across reinits to avoid duplicate elements
       const quedMessages = [];
       let lastServerNotice = null; // Last backend notice (refusal/timeout/error)
@@ -353,7 +364,8 @@ var ducke = (() => {
           }
           console.log("Sent queued messages to OpenAI WebRTC");
           mic.enabled = true;
-          dc = _dc;
+          webRTC.dc = _dc;
+          connectionOpened = true;
           resolve2();
         };
       }
@@ -379,7 +391,7 @@ var ducke = (() => {
         // opened (refusal, capacity limit, config error), connect() would
         // otherwise never settle. Reject with the last server notice so the
         // caller can show the user why the session never started.
-        if (!dc) {
+        if (!connectionOpened) {
           const error = new Error(
             "DUCK-E backend closed the connection before the session started"
           );
@@ -419,8 +431,7 @@ var ducke = (() => {
             console.log("ducke.session_update received — updating voice via session.update:", voice);
             // Send the session.update event to OpenAI
             const updateJSON = JSON.stringify(message.update);
-            if (dc) {
-              dc.send(updateJSON);
+            if (this.sendEvent(message.update)) {
               console.log("Sent session.update to OpenAI");
             } else {
               console.log("DC not ready yet, queueing session.update");
@@ -445,7 +456,7 @@ var ducke = (() => {
               this.pc = null;
             }
             // Reset dc synchronously so subsequent messages are queued
-            dc = null;
+            this.dc = null;
             // Create new peer connection and connect with new session config
             this.pc = new RTCPeerConnection();
             await openRTC(
@@ -481,17 +492,15 @@ var ducke = (() => {
               }
             }
             const messageJSON = JSON.stringify(message);
-            if (dc) {
-              dc.send(messageJSON);
+            if (this.sendEvent(message)) {
               // After forwarding a function_call_output to OpenAI, immediately
               // send response.create to trigger the model's spoken continuation.
               // This is done here (not in the backend) so the response.create
               // is sent directly on the data channel without an extra relay hop.
               if (message.item?.type === "function_call_output") {
-                const responseCreate = JSON.stringify({
+                this.sendEvent({
                   type: "response.create",
                 });
-                dc.send(responseCreate);
                 console.log("Sent response.create after function_call_output for call_id:", message.item.call_id);
               }
             } else {

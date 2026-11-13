@@ -4,6 +4,7 @@ let isMuted = false; // Microphone mute state
 let isPushToTalk = false; // Push-to-talk mode
 let transcriptMessages = []; // Store transcript messages
 let streamingResponse = null; // Track current streaming response { index, content, type }
+let responseActive = false; // Whether the Realtime API is currently generating a response
 let currentTurnUserTranscript = ''; // Last user utterance for memory extraction
 let currentTurnAssistantTranscript = ''; // Current assistant response for memory extraction
 let lastServerNotice = ''; // Last backend refusal/timeout/budget/error sentence
@@ -664,6 +665,50 @@ const addTranscriptMessage = (role, content, itemId = null) => {
   showTranscript();
 };
 
+// Send a typed turn through the same Realtime conversation as voice input.
+const sendTextMessage = (raw) => {
+  const text = raw.trim();
+  if (!text || !connectionStatus || !webRTC || typeof webRTC.sendEvent !== 'function') {
+    return false;
+  }
+  if (!webRTC.dc || webRTC.dc.readyState !== 'open') {
+    return false;
+  }
+
+  if (responseActive) {
+    webRTC.sendEvent({ type: 'response.cancel' });
+    webRTC.sendEvent({ type: 'output_audio_buffer.clear' });
+  }
+
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const id = `msg_${Array.from({ length: 24 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('')}`;
+  transcriptMessages.push({
+    itemId: id,
+    role: 'user',
+    content: escapeHtml(text),
+    rawText: text,
+    timestamp: Date.now(),
+  });
+  renderTranscript();
+  showTranscript();
+
+  webRTC.sendEvent({
+    type: 'conversation.item.create',
+    item: {
+      id,
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text }],
+    },
+  });
+  webRTC.sendEvent({ type: 'response.create' });
+  currentTurnUserTranscript = text;
+
+  const input = document.getElementById('text-input');
+  if (input) input.value = '';
+  return true;
+};
+
 // Start a new streaming response (returns index)
 const startStreamingResponse = (role, itemId = null) => {
   let index;
@@ -845,6 +890,12 @@ const handleWebRTCMessage = (event) => {
   try {
     // event now has { data: string, message: object } from our modified ducke client
     const data = event.message || (typeof event.data === 'string' ? JSON.parse(event.data) : event.data);
+
+    if (data.type === 'response.created') {
+      responseActive = true;
+    } else if (data.type === 'response.done' || data.type === 'response.cancelled') {
+      responseActive = false;
+    }
 
     // Live conversation state for the status line and tab title.
     if (connectionStatus) {
@@ -1225,6 +1276,8 @@ const updateUI = (status) => {
   const toggleButton = document.getElementById("toggle-connection");
   const muteBtn = document.getElementById("mute-btn");
   const pttControls = document.getElementById("ptt-controls");
+  const textInput = document.getElementById("text-input");
+  const textSend = document.getElementById("text-send");
   // Inline controls
   const statusIndicatorInline = document.getElementById("status-indicator-inline");
   const statusTextInline = document.getElementById("status-text-inline");
@@ -1232,6 +1285,10 @@ const updateUI = (status) => {
   const toggleButtonInline = document.getElementById("toggle-connection-inline");
   const muteBtnInline = document.getElementById("mute-btn-inline");
   const pttControlsInline = document.getElementById("ptt-controls-inline");
+
+  if (textInput) textInput.disabled = status !== "connected";
+  if (textSend) textSend.disabled = status !== "connected";
+  if (status !== "connected") responseActive = false;
 
   // Remove all status classes from both
   statusIndicator.classList.remove("connecting", "connected", "disconnected");
@@ -1517,8 +1574,18 @@ document.addEventListener("DOMContentLoaded", () => {
   const pttBtnInline = document.getElementById("ptt-btn-inline");
   attachPTTButtonEvents(pttBtnInline);
 
+  const textForm = document.getElementById("text-form");
+  const textInput = document.getElementById("text-input");
+  if (textForm && textInput) {
+    textForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      sendTextMessage(textInput.value);
+    });
+  }
+
   // Keyboard shortcut for PTT (spacebar when in PTT mode)
   document.addEventListener("keydown", (e) => {
+    if (e.target?.tagName === "INPUT" || e.target?.tagName === "TEXTAREA") return;
     if (isPushToTalk && e.code === "Space" && !e.repeat && connectionStatus) {
       e.preventDefault();
       startTalking();
@@ -1526,6 +1593,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.addEventListener("keyup", (e) => {
+    if (e.target?.tagName === "INPUT" || e.target?.tagName === "TEXTAREA") return;
     if (isPushToTalk && e.code === "Space" && connectionStatus) {
       e.preventDefault();
       stopTalking();

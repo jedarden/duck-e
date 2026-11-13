@@ -970,6 +970,34 @@
             line-height: 1.6;
         }
 
+        .text-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .text-form input {
+            flex: 1;
+            min-width: 0;
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font: inherit;
+        }
+
+        .text-form input:focus {
+            outline: 2px solid var(--primary-light);
+            outline-offset: 1px;
+        }
+
+        .text-form input:disabled,
+        .text-form button:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
         .transcript-content::-webkit-scrollbar {
             width: 6px;
         }
@@ -1708,6 +1736,10 @@
                 <div id="transcript-content" class="transcript-content">
                     <div class="transcript-empty">Conversation transcript will appear here...</div>
                 </div>
+                <form id="text-form" class="text-form">
+                    <input id="text-input" type="text" maxlength="4000" autocomplete="off" placeholder="Type or paste a message…" disabled>
+                    <button id="text-send" type="submit" disabled>Send</button>
+                </form>
             </div>
 
             <!-- Inline controls (desktop only - shown beneath transcript when has history) -->
