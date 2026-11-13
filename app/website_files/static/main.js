@@ -709,6 +709,38 @@ const sendTextMessage = (raw) => {
   return true;
 };
 
+// Replay events for a mid-conversation voice change. The API rejects
+// session.update for the voice once assistant audio exists, so the backend
+// starts a fresh Realtime session (ducke.reinit); that session begins with an
+// empty conversation and ducke.js feeds it these items so DUCK-E still
+// remembers what was said. User turns are input_text, assistant turns
+// output_text; tool cards, system messages, pending and streaming entries are
+// skipped. The last 20 turns are kept.
+const getReplayEvents = () => {
+  const textOf = (msg) => msg.rawText ?? msg.content;
+  return transcriptMessages
+    .filter((msg) => (
+      (msg.role === 'user' || msg.role === 'assistant')
+      && msg.type !== 'tool_call'
+      && !msg.pending
+      && !msg.streaming
+      && typeof textOf(msg) === 'string'
+      && textOf(msg).length > 0
+    ))
+    .slice(-20)
+    .map((msg) => ({
+      type: 'conversation.item.create',
+      item: {
+        type: 'message',
+        role: msg.role,
+        content: [{
+          type: msg.role === 'user' ? 'input_text' : 'output_text',
+          text: textOf(msg),
+        }],
+      },
+    }));
+};
+
 // Start a new streaming response (returns index)
 const startStreamingResponse = (role, itemId = null) => {
   let index;
@@ -1120,6 +1152,10 @@ const handleWebRTCMessage = (event) => {
     else if (data.type === 'ducke.voice_changed') {
       const voice = data.voice || 'unknown';
       addTranscriptMessage('system', `Voice changed to ${voice}`);
+      // The new session's data channel re-enabled the microphone when it
+      // opened; re-apply this page's state on top: silent while muted, and
+      // in push-to-talk mode unless the talk button is currently held.
+      setMicrophoneEnabled(!isMuted && !(isPushToTalk && !isTalkButtonHeld));
     }
     // Backend server notice: the DUCK-E server refused or ended this session
     // (connection limit, hourly cap, circuit breaker, duration limit, budget,
@@ -1400,6 +1436,10 @@ const toggleConnection = async () => {
 
       // Set up message handler for transcript
       webRTC.onMessage = handleWebRTCMessage;
+
+      // Supply the transcript replay when a voice change reinitialises the
+      // Realtime session (ducke.reinit).
+      webRTC.getReplayEvents = getReplayEvents;
 
       await webRTC.connect();
 

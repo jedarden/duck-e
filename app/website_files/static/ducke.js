@@ -423,30 +423,10 @@ var ducke = (() => {
             }
             return;
           }
-          // Voice change via session.update: send the update to OpenAI
-          // without tearing down the WebRTC connection. This is faster and
-          // more reliable than the old ducke.reinit approach.
-          if (type === "ducke.session_update") {
-            const voice = message.update?.session?.voice;
-            console.log("ducke.session_update received — updating voice via session.update:", voice);
-            // Send the session.update event to OpenAI
-            const updateJSON = JSON.stringify(message.update);
-            if (this.sendEvent(message.update)) {
-              console.log("Sent session.update to OpenAI");
-            } else {
-              console.log("DC not ready yet, queueing session.update");
-              quedMessages.push(updateJSON);
-            }
-            // Notify main.js so it can display a voice-change status message
-            if (this.onMessage && voice) {
-              const notif = { type: "ducke.voice_changed", voice: voice };
-              this.onMessage({ data: JSON.stringify(notif), message: notif });
-            }
-            return;
-          }
           // Voice change: tear down old WebRTC peer and establish a new one
-          // with the new session config.  The old dc is set to null synchronously
-          // so any subsequent messages (e.g. function_call_output) are queued and
+          // with the new session config (session.update cannot change the
+          // voice once the assistant has produced audio).  The old dc is set
+          // to null synchronously so any subsequent messages are queued and
           // will be replayed once the new data channel opens.
           if (type === "ducke.reinit") {
             console.log("ducke.reinit received — reinitialising WebRTC with new voice:", message.voice);
@@ -457,6 +437,20 @@ var ducke = (() => {
             }
             // Reset dc synchronously so subsequent messages are queued
             this.dc = null;
+            // The new Realtime session starts with an empty conversation.
+            // Replay the transcript so far (the page supplies the events via
+            // getReplayEvents) as text items, then have the new voice confirm
+            // itself. openRTC sends every init entry when the new data
+            // channel opens, before anything queued in the gap.
+            const replay = typeof this.getReplayEvents === "function"
+              ? this.getReplayEvents()
+              : [];
+            message.init = (Array.isArray(replay) ? replay : []).concat([{
+              type: "response.create",
+              response: {
+                instructions: "In one short sentence, confirm this is your new voice.",
+              },
+            }]);
             // Create new peer connection and connect with new session config
             this.pc = new RTCPeerConnection();
             await openRTC(
@@ -465,14 +459,19 @@ var ducke = (() => {
               this.pc,
               this.ws,
               this.microphone,
-              () => {},
+              () => {
+                // The new channel is open: openRTC re-enabled the mic and
+                // pointed webRTC.dc at the new channel. Notify main.js now —
+                // after that, so it can show the change and re-apply its
+                // mute/PTT microphone state, exactly like the initial
+                // connect does once connect() resolves.
+                if (this.onMessage) {
+                  const notif = { type: "ducke.voice_changed", voice: message.voice };
+                  this.onMessage({ data: JSON.stringify(notif), message: notif });
+                }
+              },
               (e) => console.error("ducke.reinit openRTC failed:", e)
             );
-            // Notify main.js so it can display a voice-change status message
-            if (this.onMessage) {
-              const notif = { type: "ducke.voice_changed", voice: message.voice };
-              this.onMessage({ data: JSON.stringify(notif), message: notif });
-            }
             return;
           }
           // Forward conversation items to OpenAI's data channel. The only

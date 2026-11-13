@@ -1386,7 +1386,10 @@ async def handle_media_stream(websocket: WebSocket):
             }
         )
 
-    async def handle_voice_change(voice: str) -> str:
+    async def handle_voice_change(voice: str) -> object:
+        # Returns NO_TOOL_OUTPUT on success (the reinit replaced the Realtime
+        # session, so _handle_tool_call sends no function_call_output), or an
+        # error string the model will hear.
         return await session.change_voice(voice)
 
     session.register_tool(

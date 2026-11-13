@@ -1,9 +1,14 @@
 """
 Unit tests for RealtimeSession voice change functionality.
 
-Tests the fix for duck-e-ovk: Voice change reports failure but actually succeeds.
-The root cause was that the code was using the deprecated /v1/realtime/sessions
-endpoint with an old format. The fix uses session.update event instead.
+A mid-conversation voice change needs a NEW Realtime session: session.update
+rejects the flat session.voice field outright and refuses
+session.audio.output.voice once assistant audio exists (verified live
+2026-11-12, docs/research/realtime-api-verified-2026-11-12.md). change_voice
+therefore mints a fresh ephemeral key for the new voice and sends ducke.reinit;
+the browser rebuilds the WebRTC peer and replays the transcript. A successful
+change returns the NO_TOOL_OUTPUT sentinel so _handle_tool_call does not send a
+function_call_output for a call_id that only exists in the old session.
 """
 import asyncio
 import json
@@ -13,30 +18,39 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from app.realtime_session import (
     RealtimeSession,
     AVAILABLE_VOICES,
+    NO_TOOL_OUTPUT,
     transcription_language_for,
 )
 
+# Stand-in for the sanitized config _get_ephemeral_key returns.
+FAKE_KEY_CONFIG = {
+    "client_secret": {"value": "ek_test_ephemeral"},
+    "model": "gpt-realtime-2",
+}
+
+
+@pytest.fixture
+def mock_websocket():
+    """Create a mock WebSocket."""
+    ws = AsyncMock()
+    ws.send_json = AsyncMock()
+    return ws
+
+
+@pytest.fixture
+def session(mock_websocket):
+    """Create a RealtimeSession for testing."""
+    return RealtimeSession(
+        websocket=mock_websocket,
+        model="gpt-realtime-2",
+        api_key="test-key",  # pragma: allowlist secret
+        system_message="You are a test assistant.",
+        voice="alloy",
+    )
+
 
 class TestVoiceChange:
-    """Test voice change functionality."""
-
-    @pytest.fixture
-    def mock_websocket(self):
-        """Create a mock WebSocket."""
-        ws = AsyncMock()
-        ws.send_json = AsyncMock()
-        return ws
-
-    @pytest.fixture
-    def session(self, mock_websocket):
-        """Create a RealtimeSession for testing."""
-        return RealtimeSession(
-            websocket=mock_websocket,
-            model="gpt-realtime-2",
-            api_key="test-key",  # pragma: allowlist secret
-            system_message="You are a test assistant.",
-            voice="alloy",
-        )
+    """change_voice: valid voices reinit, invalid ones return an error string."""
 
     def test_available_voices_list(self):
         """Test that AVAILABLE_VOICES contains expected voices."""
@@ -47,139 +61,151 @@ class TestVoiceChange:
         for voice in expected_voices:
             assert voice in AVAILABLE_VOICES
 
-    def test_change_voice_invalid_voice(self, session):
-        """Test that change_voice rejects invalid voices."""
-        result = asyncio.run(session.change_voice("invalid_voice"))
+    def test_change_voice_invalid_voice(self, session, mock_websocket):
+        """An invalid voice returns the error string and sends nothing."""
+        result = asyncio.run(session.change_voice("fable"))
 
-        assert "Invalid voice" in result
-        assert "invalid_voice" in result
+        assert "Invalid voice 'fable'" in result
         assert "Available voices:" in result
+        for voice in AVAILABLE_VOICES:
+            assert voice in result
+        mock_websocket.send_json.assert_not_awaited()
 
-    def test_change_voice_valid_voice_sends_session_update(self, session, mock_websocket):
-        """Test that change_voice sends ducke.session_update message."""
-        result = asyncio.run(session.change_voice("cedar"))
+    def test_valid_voice_sends_exactly_one_reinit(self, session, mock_websocket):
+        """A valid voice sends only the ducke.reinit message, key minted for it."""
+        with patch.object(
+            session, "_get_ephemeral_key", new=AsyncMock(return_value=dict(FAKE_KEY_CONFIG))
+        ) as mock_get_key:
+            result = asyncio.run(session.change_voice("cedar"))
 
-        # Verify the message was sent
-        assert mock_websocket.send_json.called
-        sent_message = mock_websocket.send_json.call_args[0][0]
+        assert result is NO_TOOL_OUTPUT
+        mock_get_key.assert_awaited_once_with("cedar")
+        assert mock_websocket.send_json.await_count == 1
+        sent = mock_websocket.send_json.await_args.args[0]
+        assert sent == {
+            "type": "ducke.reinit",
+            "config": FAKE_KEY_CONFIG,
+            "voice": "cedar",
+            "init": [],
+        }
+        assert sent["config"]["client_secret"]["value"] == "ek_test_ephemeral"
 
-        # Verify message structure
-        assert sent_message["type"] == "ducke.session_update"
-        assert "update" in sent_message
-        assert sent_message["update"]["type"] == "session.update"
-        assert sent_message["update"]["session"]["voice"] == "cedar"
-
-    def test_change_voice_updates_session_voice(self, session, mock_websocket):
-        """Test that change_voice updates the session's voice attribute."""
-        assert session.voice == "alloy"  # Initial voice
-
-        asyncio.run(session.change_voice("shimmer"))
+    def test_valid_voice_updates_session_voice(self, session, mock_websocket):
+        """The session remembers the new voice for later key mints."""
+        with patch.object(
+            session, "_get_ephemeral_key", new=AsyncMock(return_value=dict(FAKE_KEY_CONFIG))
+        ):
+            asyncio.run(session.change_voice("shimmer"))
 
         assert session.voice == "shimmer"
 
-    def test_change_voice_returns_success_message(self, session, mock_websocket):
-        """Test that change_voice returns a success message."""
-        result = asyncio.run(session.change_voice("echo"))
-
-        assert "Voice changed to echo" in result
-        assert "Reinitialising" not in result  # Old behavior text should be gone
-
-    def test_change_voice_handles_websocket_error(self, session, mock_websocket):
-        """Test that change_voice handles WebSocket errors gracefully."""
-        # Simulate WebSocket error
-        mock_websocket.send_json.side_effect = Exception("WebSocket error")
-
-        result = asyncio.run(session.change_voice("sage"))
-
-        # Should return an error message
-        assert "Failed to change voice" in result
-
-    def test_all_available_voices_are_accepted(self, session, mock_websocket):
-        """Test that all voices in AVAILABLE_VOICES are accepted."""
+    def test_all_available_voices_send_reinit(self, session, mock_websocket):
+        """Every accepted voice produces a reinit carrying that voice."""
         for voice in AVAILABLE_VOICES:
             mock_websocket.send_json.reset_mock()
-            result = asyncio.run(session.change_voice(voice))
+            with patch.object(
+                session, "_get_ephemeral_key",
+                new=AsyncMock(return_value=dict(FAKE_KEY_CONFIG)),
+            ):
+                result = asyncio.run(session.change_voice(voice))
 
-            # Should succeed
-            assert f"Voice changed to {voice}" in result
+            assert result is NO_TOOL_OUTPUT
+            sent = mock_websocket.send_json.call_args[0][0]
+            assert sent["type"] == "ducke.reinit"
+            assert sent["voice"] == voice
 
-            # Should send the correct voice in the session update
-            sent_message = mock_websocket.send_json.call_args[0][0]
-            assert sent_message["update"]["session"]["voice"] == voice
+    def test_key_mint_failure_sends_no_reinit(self, session, mock_websocket):
+        """If minting the ephemeral key fails, the session is left alone."""
+        with patch.object(
+            session, "_get_ephemeral_key",
+            new=AsyncMock(side_effect=RuntimeError("upstream unavailable")),
+        ):
+            result = asyncio.run(session.change_voice("cedar"))
+
+        assert result.startswith("Failed to change voice")
+        assert "upstream unavailable" in result
+        mock_websocket.send_json.assert_not_awaited()
+
+    def test_websocket_send_failure_returns_error(self, session, mock_websocket):
+        """A WebSocket failure while sending the reinit is reported, not raised."""
+        mock_websocket.send_json.side_effect = TimeoutError("socket timed out")
+        with patch.object(
+            session, "_get_ephemeral_key", new=AsyncMock(return_value=dict(FAKE_KEY_CONFIG))
+        ):
+            result = asyncio.run(session.change_voice("sage"))
+
+        assert result == "Failed to change voice: socket timed out"
 
 
-class TestVoiceChangeMessageFormat:
-    """Test the exact message format for session.update."""
+class TestVoiceChangeToolCallFlow:
+    """_handle_tool_call sends a function_call_output unless the voice changed."""
 
     @pytest.fixture
-    def mock_websocket(self):
-        """Create a mock WebSocket."""
-        ws = AsyncMock()
-        ws.send_json = AsyncMock()
-        return ws
-
-    @pytest.fixture
-    def session(self, mock_websocket):
-        """Create a RealtimeSession for testing."""
-        return RealtimeSession(
+    def voice_session(self, mock_websocket):
+        """A session whose change_voice tool runs the real change_voice."""
+        s = RealtimeSession(
             websocket=mock_websocket,
             model="gpt-realtime-2",
             api_key="test-key",  # pragma: allowlist secret
             system_message="You are a test assistant.",
             voice="alloy",
         )
+        s.tool_handlers["change_voice"] = s.change_voice
+        return s
 
-    def test_session_update_format(self, session, mock_websocket):
-        """
-        Test that session.update format is correct.
+    @staticmethod
+    def _call_tool(session, voice):
+        asyncio.run(session._handle_tool_call({
+            "name": "change_voice",
+            "call_id": "call_v",
+            "arguments": json.dumps({"voice": voice}),
+        }))
 
-        The session.update event should have:
-        - type: "session.update"
-        - session.voice: <voice name>
-        """
-        asyncio.run(session.change_voice("cedar"))
+    @staticmethod
+    def _sent_types(mock_websocket):
+        return [c.args[0].get("type") for c in mock_websocket.send_json.await_args_list]
 
-        sent_message = mock_websocket.send_json.call_args[0][0]
-        update = sent_message["update"]
+    def test_valid_voice_sends_no_conversation_item(self, voice_session, mock_websocket):
+        """A successful reinit suppresses the function_call_output entirely."""
+        with patch.object(
+            voice_session, "_get_ephemeral_key",
+            new=AsyncMock(return_value=dict(FAKE_KEY_CONFIG)),
+        ):
+            self._call_tool(voice_session, "cedar")
 
-        # Verify format
-        assert update["type"] == "session.update"
-        assert "voice" in update["session"]
-        assert update["session"]["voice"] == "cedar"
+        # Only the reinit was sent — no conversation.item.create for a
+        # call_id that belongs to the replaced session.
+        assert self._sent_types(mock_websocket) == ["ducke.reinit"]
 
-    def test_session_update_does_not_call_ephemeral_key_endpoint(self, session, mock_websocket):
-        """
-        Test that change_voice does NOT call _get_ephemeral_key.
+    def test_invalid_voice_sends_tool_output_naming_voices(
+        self, voice_session, mock_websocket
+    ):
+        """An invalid voice is reported to the model with the voice list."""
+        self._call_tool(voice_session, "fable")
 
-        The fix for duck-e-ovk avoids calling the deprecated /v1/realtime/sessions
-        endpoint by using session.update instead.
-        """
-        with patch.object(session, '_get_ephemeral_key', new=AsyncMock()) as mock_get_key:
-            asyncio.run(session.change_voice("coral"))
+        assert self._sent_types(mock_websocket) == ["conversation.item.create"]
+        sent = mock_websocket.send_json.await_args.args[0]
+        assert sent["item"]["type"] == "function_call_output"
+        assert sent["item"]["call_id"] == "call_v"
+        assert "Invalid voice 'fable'" in sent["item"]["output"]
+        for voice in AVAILABLE_VOICES:
+            assert voice in sent["item"]["output"]
 
-            # _get_ephemeral_key should NOT be called
-            assert not mock_get_key.called
+    def test_key_mint_failure_sends_failure_output_and_no_reinit(
+        self, voice_session, mock_websocket
+    ):
+        """A failed key mint keeps the old session and tells the model."""
+        with patch.object(
+            voice_session, "_get_ephemeral_key",
+            new=AsyncMock(side_effect=RuntimeError("upstream unavailable")),
+        ):
+            self._call_tool(voice_session, "cedar")
 
-    def test_session_update_preserves_other_session_config(self, session, mock_websocket):
-        """
-        Test that session.update only changes voice, not other session config.
-
-        The session.update should only include the voice field,
-        not modify other session settings like tools or instructions.
-        """
-        asyncio.run(session.change_voice("marin"))
-
-        sent_message = mock_websocket.send_json.call_args[0][0]
-        session_obj = sent_message["update"]["session"]
-
-        # Should only have voice
-        assert "voice" in session_obj
-        assert session_obj["voice"] == "marin"
-
-        # Should NOT have tools or instructions in the update
-        # (those are set during initial session creation)
-        assert "tools" not in session_obj
-        assert "instructions" not in session_obj
+        types = self._sent_types(mock_websocket)
+        assert "ducke.reinit" not in types
+        sent = mock_websocket.send_json.await_args.args[0]
+        assert sent["type"] == "conversation.item.create"
+        assert sent["item"]["output"].startswith("Failed to change voice")
 
 
 class _FakeResponse:

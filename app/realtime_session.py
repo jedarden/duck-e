@@ -39,6 +39,12 @@ TRANSCRIPTION_LANGUAGES = frozenset([
 _VAD_EAGERNESS_VALUES = ("low", "medium", "high", "auto")
 _NOISE_REDUCTION_TYPES = ("near_field", "far_field")
 
+# Sentinel a tool handler returns to say "no function_call_output must be
+# sent for this call". change_voice returns it on success: the reinit it just
+# triggered replaced the Realtime session, so the call_id only exists in the
+# old conversation and the API would reject an output for it.
+NO_TOOL_OUTPUT = object()
+
 
 def transcription_language_for(accept_language: str) -> Optional[str]:
     """
@@ -196,16 +202,23 @@ class RealtimeSession:
             "model": self.model,
         }
 
-    async def change_voice(self, voice: str) -> str:
+    async def change_voice(self, voice: str):
         """
-        Change the assistant's voice by sending a session.update event.
+        Change the assistant's voice by starting a new Realtime session.
 
-        Uses the OpenAI Realtime API's session.update event to change the voice
-        without needing to regenerate ephemeral keys or tear down the WebRTC
-        connection. This is faster and more reliable than the old reinit approach.
+        session.update cannot do this: the API rejects the flat session.voice
+        field outright, and session.audio.output.voice is refused once the
+        assistant has produced any audio ("Cannot update a conversation's voice
+        if assistant audio is present." — verified live 2026-11-12, see
+        docs/research/realtime-api-verified-2026-11-12.md). So a mid-session
+        voice change mints a fresh ephemeral key for the new voice and sends
+        ducke.reinit; the browser tears down the old WebRTC peer, connects a
+        new one and replays the transcript as text items so the conversation
+        context survives.
 
-        The function_call_output reply (sent by _handle_tool_call after this
-        returns) will be spoken by DUCK-E in the new voice.
+        Returns NO_TOOL_OUTPUT on success (the call_id belongs to the old
+        session, so _handle_tool_call must not send a function_call_output),
+        or a plain error string the model will hear on any failure.
         """
         if voice not in AVAILABLE_VOICES:
             return (
@@ -216,22 +229,14 @@ class RealtimeSession:
         try:
             self.logger.info(f"Changing voice to: {voice}")
             self.voice = voice
-
-            # Send a session.update event to change the voice.
-            # The function_call_output from _handle_tool_call (containing
-            # "Voice changed to X") will be spoken in the new voice, and
-            # ducke.js will send response.create to trigger continuation.
+            config = await self._get_ephemeral_key(voice)
             await self.websocket.send_json({
-                "type": "ducke.session_update",
-                "update": {
-                    "type": "session.update",
-                    "session": {
-                        "type": "realtime",
-                        "voice": voice,
-                    },
-                },
+                "type": "ducke.reinit",
+                "config": config,
+                "voice": voice,
+                "init": [],
             })
-            return f"Voice changed to {voice}."
+            return NO_TOOL_OUTPUT
         except Exception as e:
             self.logger.error(f"Failed to change voice: {e}", exc_info=True)
             return f"Failed to change voice: {str(e)}"
@@ -337,24 +342,30 @@ class RealtimeSession:
             result = f"Error executing tool: {str(e)}"
 
         t_handler_end = time.monotonic()
-        result_str = str(result)
+        # A successful change_voice reinitialised the Realtime session: its
+        # call_id belongs to the old conversation, which no longer exists on
+        # the API side, so no function_call_output may be sent for it.
+        suppress_output = result is NO_TOOL_OUTPUT
+        result_str = "" if suppress_output else str(result)
         self.logger.info(json.dumps({
             "event": "tool_call.handler_done",
             "tool": name,
             "call_id": call_id,
             "result_size": len(result_str),
+            "suppressed": suppress_output,
             "handler_duration_ms": round((t_handler_end - t_handler_start) * 1000, 1),
             "ts": time.time(),
         }))
 
-        await self.websocket.send_json({
-            "type": "conversation.item.create",
-            "item": {
-                "type": "function_call_output",
-                "call_id": call_id,
-                "output": result_str,
-            },
-        })
+        if not suppress_output:
+            await self.websocket.send_json({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": result_str,
+                },
+            })
         # NOTE: response.create is sent by the browser client (ducke.js)
         # immediately after it forwards the function_call_output to the
         # OpenAI data channel.  Sending it from the backend was unreliable

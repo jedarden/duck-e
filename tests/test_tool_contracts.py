@@ -3,7 +3,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import httpx
 import pytest
@@ -437,6 +437,13 @@ async def test_voice_tool_dispatches_and_reports_send_timeout(tool_context):
         system_message="test",
     )
 
-    failure = await session.change_voice("cedar")
+    # change_voice mints a new ephemeral key before sending ducke.reinit;
+    # mock the mint so only the websocket timeout is under test.
+    with patch.object(
+        session,
+        "_get_ephemeral_key",
+        new=AsyncMock(return_value={"client_secret": {"value": "ek"}, "model": "test-model"}),
+    ):
+        failure = await session.change_voice("cedar")
 
     assert failure == "Failed to change voice: socket timed out"
