@@ -500,6 +500,7 @@ const togglePushToTalk = () => {
   console.log('togglePushToTalk clicked, current state:', isPushToTalk);
 
   isPushToTalk = !isPushToTalk;
+  if (!isPushToTalk) isTalkButtonHeld = false;
   updatePTTUI(isPushToTalk);
   savePushToTalkState(isPushToTalk);
   refreshIdleState();
@@ -532,6 +533,8 @@ const startTalking = () => {
 };
 
 const stopTalking = () => {
+  isTalkButtonHeld = false;
+  refreshIdleState();
   if (!isPushToTalk || !webRTC || !webRTC.microphone) return;
 
   const pttBtn = document.getElementById('ptt-btn');
@@ -539,7 +542,6 @@ const stopTalking = () => {
   if (pttBtn) pttBtn.classList.remove('active');
   if (pttBtnInline) pttBtnInline.classList.remove('active');
   setMicrophoneEnabled(false);
-  isTalkButtonHeld = false;
   refreshIdleState();
   console.log('PTT: Stopped talking');
 };
@@ -1288,6 +1290,7 @@ const updateUI = (status) => {
     statusIndicator.classList.add("disconnected");
     statusText.textContent = "Ready to Connect";
     // Leave the conversation state behind: restore the original tab title.
+    isTalkButtonHeld = false;
     currentConversationState = null;
     document.title = baseDocumentTitle;
     buttonText.textContent = "Connect";

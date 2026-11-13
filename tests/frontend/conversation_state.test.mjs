@@ -10,7 +10,7 @@
 // idle variants, and the indicator/title DOM.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { connectPage, loadPage } from './harness.mjs';
+import { connectPage, loadPage, makeBrowser } from './harness.mjs';
 
 const LISTEN_FLAGS = { isMuted: false, isPushToTalk: false, talkButtonHeld: false, sawOutputAudioBuffer: false };
 const MUTED_FLAGS = { ...LISTEN_FLAGS, isMuted: true };
@@ -153,16 +153,21 @@ test('labels: states are short, tool names are formatted', () => {
 test('page: a voice turn with output_audio_buffer events ends when the audio stops', async () => {
   const { browser, dc } = await connectPage();
   const status = () => browser.document.getElementById('status-text').textContent;
+  const state = () => browser.document.getElementById('status-indicator').dataset.state;
 
   assert.equal(status(), 'Listening');
+  assert.equal(state(), 'listening');
   dc.openaiSends({ type: 'input_audio_buffer.speech_started' });
   assert.equal(status(), 'Hearing you…');
+  assert.equal(state(), 'hearing');
   dc.openaiSends({ type: 'input_audio_buffer.speech_stopped' });
   assert.equal(status(), 'Thinking…');
+  assert.equal(state(), 'thinking');
   dc.openaiSends({ type: 'response.created' });
   assert.equal(status(), 'Thinking…');
   dc.openaiSends({ type: 'output_audio_buffer.started' });
   assert.equal(status(), 'Speaking');
+  assert.equal(state(), 'speaking');
   dc.openaiSends({ type: 'response.output_audio_transcript.delta', item_id: 'a', delta: 'Quack' });
   assert.equal(status(), 'Speaking');
   // Audio is still playing: response.done must not end the speaking state.
@@ -170,6 +175,7 @@ test('page: a voice turn with output_audio_buffer events ends when the audio sto
   assert.equal(status(), 'Speaking');
   dc.openaiSends({ type: 'output_audio_buffer.stopped' });
   assert.equal(status(), 'Listening');
+  assert.equal(state(), 'listening');
 });
 
 test('page: a voice turn without output_audio_buffer events returns to Listening on response.done', async () => {
@@ -189,12 +195,14 @@ test('page: a voice turn without output_audio_buffer events returns to Listening
 test('page: a tool turn shows the tool, then thinking on the backend result', async () => {
   const { browser, ws, dc } = await connectPage();
   const status = () => browser.document.getElementById('status-text').textContent;
+  const state = () => browser.document.getElementById('status-indicator').dataset.state;
 
   dc.openaiSends({
     type: 'response.function_call_arguments.done',
     name: 'web_search', call_id: 'call_1', arguments: '{"query":"ducks"}',
   });
   assert.equal(status(), 'Using Web Search…');
+  assert.equal(state(), 'tool');
 
   // The backend relays the tool result to OpenAI; main.js sees the same event.
   await ws.serverSends({
@@ -202,26 +210,34 @@ test('page: a tool turn shows the tool, then thinking on the backend result', as
     item: { type: 'function_call_output', call_id: 'call_1', output: 'ducks quack' },
   });
   assert.equal(status(), 'Thinking…');
+  assert.equal(state(), 'thinking');
 
   dc.openaiSends({ type: 'response.output_audio_transcript.delta', item_id: 'b', delta: 'Ducks quack.' });
   assert.equal(status(), 'Speaking');
+  assert.equal(state(), 'speaking');
 });
 
 test('page: mute and PTT re-evaluate the idle state', async () => {
   const { browser, dc } = await connectPage();
   const status = () => browser.document.getElementById('status-text').textContent;
+  const state = () => browser.document.getElementById('status-indicator').dataset.state;
 
   browser.evaluate('toggleMute')();
   assert.equal(status(), 'Microphone muted');
+  assert.equal(state(), 'muted');
   browser.evaluate('toggleMute')();
   assert.equal(status(), 'Listening');
+  assert.equal(state(), 'listening');
 
   browser.evaluate('togglePushToTalk')();
   assert.equal(status(), 'Hold to talk');
+  assert.equal(state(), 'ptt-idle');
   browser.evaluate('startTalking')();
   assert.equal(status(), 'Listening');
+  assert.equal(state(), 'listening');
   dc.openaiSends({ type: 'input_audio_buffer.speech_started' });
   assert.equal(status(), 'Hearing you…');
+  assert.equal(state(), 'hearing');
   dc.openaiSends({ type: 'input_audio_buffer.speech_stopped' });
   assert.equal(status(), 'Thinking…');
   dc.openaiSends({ type: 'response.cancelled' });
@@ -229,6 +245,7 @@ test('page: mute and PTT re-evaluate the idle state', async () => {
   assert.equal(status(), 'Listening');
   browser.evaluate('stopTalking')();
   assert.equal(status(), 'Hold to talk');
+  assert.equal(state(), 'ptt-idle');
 });
 
 test('page: muting mid-conversation does not clobber a non-idle state', async () => {
@@ -245,7 +262,9 @@ test('page: muting mid-conversation does not clobber a non-idle state', async ()
 });
 
 test('page: the indicator data-state and document.title follow the conversation', async () => {
-  const { browser, dc } = await connectPage();
+  const browser = makeBrowser();
+  browser.document.title = 'DUCK-E - Voice Assistant';
+  const { dc } = await connectPage(browser);
   const state = () => browser.document.getElementById('status-indicator').dataset.state;
   const inlineState = () => browser.document.getElementById('status-indicator-inline').dataset.state;
 
@@ -266,5 +285,5 @@ test('page: the indicator data-state and document.title follow the conversation'
   assert.equal(browser.document.getElementById('status-text').textContent, 'Ready to Connect');
   assert.equal(state(), undefined);
   assert.equal(inlineState(), undefined);
-  assert.equal(browser.document.title, 'DUCK-E');
+  assert.equal(browser.document.title, 'DUCK-E - Voice Assistant');
 });
