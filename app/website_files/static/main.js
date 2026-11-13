@@ -6,6 +6,7 @@ let transcriptMessages = []; // Store transcript messages
 let streamingResponse = null; // Track current streaming response { index, content, type }
 let currentTurnUserTranscript = ''; // Last user utterance for memory extraction
 let currentTurnAssistantTranscript = ''; // Current assistant response for memory extraction
+let lastServerNotice = ''; // Last backend refusal/timeout/budget/error sentence
 
 // OAuth state
 let oauthToken = null; // JWT access token
@@ -202,6 +203,42 @@ const perfLogSummary = () => {
     `total: ${fmt(total)}`,
   ];
   console.log(`[DUCK-E Perf] ${parts.join(', ')}`);
+};
+
+// Escape HTML special characters. Transcript content is rendered through
+// marked/innerHTML in renderTranscript, so server-provided text must be
+// escaped before it is stored.
+const escapeHtml = (text) => String(text)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+// Turn a DUCK-E backend notice (refusal, timeout, budget cap, error) into
+// one human-readable sentence for the transcript and status line.
+const serverNoticeSentence = (notice) => {
+  switch (notice.type) {
+    case 'connection_limit_exceeded': {
+      let sentence = notice.message || 'Connection limit exceeded';
+      if (typeof notice.retry_after_seconds === 'number') {
+        sentence += ` Try again in ${notice.retry_after_seconds} seconds.`;
+      }
+      return sentence;
+    }
+    case 'service_unavailable': {
+      let sentence = notice.error || notice.message || 'Service temporarily unavailable';
+      if (notice.reset_time) {
+        sentence += ` Resets at ${notice.reset_time}.`;
+      }
+      return sentence;
+    }
+    case 'session_timeout':
+    case 'budget_exceeded':
+    case 'error':
+      return notice.error || `Server message: ${notice.type}`;
+    default:
+      return `Server message: ${notice.type}`;
+  }
 };
 
 // Configure marked for safe rendering
@@ -998,6 +1035,15 @@ const handleWebRTCMessage = (event) => {
       const voice = data.voice || 'unknown';
       addTranscriptMessage('system', `Voice changed to ${voice}`);
     }
+    // Backend server notice: the DUCK-E server refused or ended this session
+    // (connection limit, hourly cap, circuit breaker, duration limit, budget,
+    // or an initialization error). Show the reason to the user.
+    else if (data.type === 'ducke.server_notice') {
+      const notice = data.notice || {};
+      lastServerNotice = escapeHtml(serverNoticeSentence(notice));
+      console.error('[DUCK-E] Server notice:', notice);
+      addTranscriptMessage('system', lastServerNotice);
+    }
     // Backend API cost (web_search, memory extraction via gpt-5.4-nano)
     else if (data.type === 'ducke.backend_cost') {
       if (!sessionCost.startTime) sessionCost.startTime = Date.now();
@@ -1090,6 +1136,17 @@ const updateUI = (status) => {
   }
 };
 
+// Surface the last backend notice in the status line (after the standard
+// disconnected UI is applied), so a refused or ended session shows why
+// instead of dropping back to "Ready to Connect".
+const applyServerNoticeStatus = () => {
+  if (!lastServerNotice) return;
+  const statusText = document.getElementById("status-text");
+  const statusTextInline = document.getElementById("status-text-inline");
+  if (statusText) statusText.textContent = lastServerNotice;
+  if (statusTextInline) statusTextInline.textContent = "Ended";
+};
+
 const toggleConnection = async () => {
   if (!connectionStatus) {
     // User is attempting to connect.
@@ -1097,6 +1154,7 @@ const toggleConnection = async () => {
 
     // Reset cost tracking state for new session
     resetCostState();
+    lastServerNotice = null; // Clear any notice from a previous session
 
     try {
       // Use WebSocket URL with OAuth token if available
@@ -1106,6 +1164,7 @@ const toggleConnection = async () => {
       // Set up the disconnect callback.
       webRTC.onDisconnect = () => {
         updateUI("disconnected");
+        applyServerNoticeStatus();
         connectionStatus = false;
         resetCostState(); // Clear stale cost data on disconnect
       };
@@ -1131,11 +1190,16 @@ const toggleConnection = async () => {
     } catch (error) {
       console.error("Connection error:", error);
       updateUI("disconnected");
+      applyServerNoticeStatus();
       connectionStatus = false;
       resetCostState(); // Clear any partial cost state on failed connection
 
-      // Show error notification
-      alert("Failed to connect to DUCK-E. Please check your microphone permissions and try again.");
+      // Show the microphone-permission notification only for errors the
+      // server did not explain (a serverNotice means the backend already
+      // told the user why the session was refused).
+      if (!error?.serverNotice) {
+        alert("Failed to connect to DUCK-E. Please check your microphone permissions and try again.");
+      }
     }
   } else {
     // User is attempting to disconnect.

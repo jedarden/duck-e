@@ -258,6 +258,7 @@ var ducke = (() => {
       let dc = null;
       let audioEl = null; // Reused across reinits to avoid duplicate elements
       const quedMessages = [];
+      let lastServerNotice = null; // Last backend notice (refusal/timeout/error)
       let resolve, reject;
       let completed = new Promise((_resolve, _reject) => {
         resolve = _resolve;
@@ -374,6 +375,17 @@ var ducke = (() => {
       this.ws.onclose = (event) => {
         this.close();
         this.onDisconnect();
+        // If the backend closed the socket before the OpenAI data channel
+        // opened (refusal, capacity limit, config error), connect() would
+        // otherwise never settle. Reject with the last server notice so the
+        // caller can show the user why the session never started.
+        if (!dc) {
+          const error = new Error(
+            "DUCK-E backend closed the connection before the session started"
+          );
+          error.serverNotice = lastServerNotice;
+          reject(error);
+        }
       };
       this.ws.onmessage = async (event) => {
         try {
@@ -452,49 +464,57 @@ var ducke = (() => {
             }
             return;
           }
-          // Forward function_call_output to onMessage so the transcript can
-          // display the tool result before it is relayed to OpenAI.
-          if (
-            type === "conversation.item.create" &&
-            message.item?.type === "function_call_output" &&
-            this.onMessage
-          ) {
-            try {
-              this.onMessage({ data: event.data, message: message });
-            } catch (callbackError) {
-              console.error("Error in onMessage callback for function_call_output", callbackError);
+          // Forward conversation items to OpenAI's data channel. The only
+          // backend messages meant for the model are conversation.item.create
+          // events (currently just tool results).
+          if (type === "conversation.item.create") {
+            // Forward function_call_output to onMessage so the transcript can
+            // display the tool result before it is relayed to OpenAI.
+            if (
+              message.item?.type === "function_call_output" &&
+              this.onMessage
+            ) {
+              try {
+                this.onMessage({ data: event.data, message: message });
+              } catch (callbackError) {
+                console.error("Error in onMessage callback for function_call_output", callbackError);
+              }
             }
+            const messageJSON = JSON.stringify(message);
+            if (dc) {
+              dc.send(messageJSON);
+              // After forwarding a function_call_output to OpenAI, immediately
+              // send response.create to trigger the model's spoken continuation.
+              // This is done here (not in the backend) so the response.create
+              // is sent directly on the data channel without an extra relay hop.
+              if (message.item?.type === "function_call_output") {
+                const responseCreate = JSON.stringify({
+                  type: "response.create",
+                });
+                dc.send(responseCreate);
+                console.log("Sent response.create after function_call_output for call_id:", message.item.call_id);
+              }
+            } else {
+              console.log("DC not ready yet, queueing", message);
+              quedMessages.push(messageJSON);
+              // Queue response.create right after the function_call_output
+              if (message.item?.type === "function_call_output") {
+                quedMessages.push(JSON.stringify({
+                  type: "response.create",
+                  response: { modalities: ["text", "audio"] },
+                }));
+              }
+            }
+            return;
           }
-          const messageJSON = JSON.stringify(message);
-          if (dc) {
-            dc.send(messageJSON);
-            // After forwarding a function_call_output to OpenAI, immediately
-            // send response.create to trigger the model's spoken continuation.
-            // This is done here (not in the backend) so the response.create
-            // is sent directly on the data channel without an extra relay hop.
-            if (
-              type === "conversation.item.create" &&
-              message.item?.type === "function_call_output"
-            ) {
-              const responseCreate = JSON.stringify({
-                type: "response.create",
-              });
-              dc.send(responseCreate);
-              console.log("Sent response.create after function_call_output for call_id:", message.item.call_id);
-            }
-          } else {
-            console.log("DC not ready yet, queueing", message);
-            quedMessages.push(messageJSON);
-            // Queue response.create right after the function_call_output
-            if (
-              type === "conversation.item.create" &&
-              message.item?.type === "function_call_output"
-            ) {
-              quedMessages.push(JSON.stringify({
-                type: "response.create",
-                response: { modalities: ["text", "audio"] },
-              }));
-            }
+          // Anything else the backend sends is a server notice: a refusal,
+          // timeout, budget cap or error. Deliver it to main.js so the user
+          // sees why the session ended — never relay it to OpenAI.
+          console.log("Server notice from DUCK-E backend", message);
+          lastServerNotice = message;
+          if (this.onMessage) {
+            const notice = { type: "ducke.server_notice", notice: message };
+            this.onMessage({ data: JSON.stringify(notice), message: notice });
           }
         } catch (error) {
           console.error("Error processing websocket message", event.data, error);
