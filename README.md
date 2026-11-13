@@ -114,6 +114,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers --en
 |----------|----------|---------|-------------|
 | `OPENAI_API_KEY` | Yes | — | Must have Realtime API access |
 | `REALTIME_MODEL` | No | `gpt-realtime-2` | Override the realtime model |
+| `REALTIME_VAD_EAGERNESS` | No | `auto` | Semantic turn-detection eagerness: `low`, `medium`, `high`, `auto`; invalid values fall back to `auto` |
+| `REALTIME_NOISE_REDUCTION` | No | `near_field` | Input noise reduction: `near_field`, `far_field`, or `off` to disable; invalid values fall back to `near_field` |
+| `REALTIME_TRANSCRIPTION_MODEL` | No | `gpt-4o-transcribe` | Input transcription model (was `whisper-1`) |
 | `GOOGLE_CLIENT_ID` | No | — | Google OAuth client ID (for user authentication) |
 | `GOOGLE_CLIENT_SECRET` | No | — | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | No | `http://localhost:8000/auth/callback` | OAuth callback URL |

@@ -20,7 +20,7 @@ import uuid
 # Import configuration module for automatic OAI_CONFIG_LIST generation
 from app.config import get_realtime_config, get_swarm_config, validate_config
 from app.memory import UserMemoryStore, FactCategory, FactSource
-from app.realtime_session import RealtimeSession
+from app.realtime_session import RealtimeSession, transcription_language_for
 
 # Import security middleware
 from app.middleware import (
@@ -793,6 +793,7 @@ async def handle_media_stream(websocket: WebSocket):
             system_message=system_message,
             logger=logger,
             on_turn_done=_on_turn_done if memory_store is not None else None,
+            transcription_language=transcription_language_for(safe_language),
         )
 
         # Start session duration watchdog task. Limits follow the session's

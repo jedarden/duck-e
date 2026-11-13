@@ -7,6 +7,7 @@ import asyncio
 import httpx
 import json
 import openai
+import os
 import time
 from logging import Logger, getLogger
 from typing import Any, Callable, Optional
@@ -19,6 +20,62 @@ AVAILABLE_VOICES = [
     "alloy", "ash", "ballad", "coral", "echo",
     "fable", "nova", "onyx", "sage", "shimmer", "verse"
 ]
+
+# Two-letter transcription language codes the Realtime API accepts for
+# audio.input.transcription.language (verified live 2026-11-12 — see
+# docs/research/realtime-api-verified-2026-11-12.md). An unsupported code makes
+# session creation fail outright with HTTP 400, so only these may ever be sent.
+TRANSCRIPTION_LANGUAGES = frozenset([
+    "af", "ar", "az", "be", "bg", "bs", "ca", "cs", "cy", "da", "de", "el",
+    "en", "es", "et", "fa", "fi", "fr", "gl", "he", "hi", "hr", "hu", "hy",
+    "id", "is", "it", "iw", "ja", "kk", "kn", "ko", "lt", "lv", "mi", "mk",
+    "mr", "ms", "ne", "nl", "no", "pl", "pt", "ro", "ru", "sk", "sl", "sr",
+    "sv", "sw", "ta", "th", "tl", "tr", "uk", "ur", "vi", "zh",
+])
+
+_VAD_EAGERNESS_VALUES = ("low", "medium", "high", "auto")
+_NOISE_REDUCTION_TYPES = ("near_field", "far_field")
+
+
+def transcription_language_for(accept_language: str) -> Optional[str]:
+    """
+    Map an Accept-Language header value to a supported transcription code.
+
+    Takes the first tag of the header value (before any comma or semicolon),
+    keeps the primary subtag (before "-" or "_"), lower-cases it, and returns
+    it only when it is in TRANSCRIPTION_LANGUAGES — otherwise None. None means
+    the language field is omitted from the session payload, because an
+    unsupported code makes session creation fail outright.
+    """
+    if not accept_language:
+        return None
+    first_tag = accept_language.split(",", 1)[0].split(";", 1)[0]
+    primary = first_tag.split("-", 1)[0].split("_", 1)[0].strip().lower()
+    return primary if primary in TRANSCRIPTION_LANGUAGES else None
+
+
+def _vad_eagerness() -> str:
+    """REALTIME_VAD_EAGERNESS → semantic VAD eagerness; invalid values fall back to 'auto'."""
+    raw = (os.getenv("REALTIME_VAD_EAGERNESS") or "").strip().lower()
+    return raw if raw in _VAD_EAGERNESS_VALUES else "auto"
+
+
+def _noise_reduction_type() -> Optional[str]:
+    """
+    REALTIME_NOISE_REDUCTION → noise reduction type.
+
+    'off' returns None (the key is omitted from the payload); invalid values
+    fall back to 'near_field'.
+    """
+    raw = (os.getenv("REALTIME_NOISE_REDUCTION") or "").strip().lower()
+    if raw == "off":
+        return None
+    return raw if raw in _NOISE_REDUCTION_TYPES else "near_field"
+
+
+def _transcription_model() -> str:
+    """REALTIME_TRANSCRIPTION_MODEL → input transcription model."""
+    return os.getenv("REALTIME_TRANSCRIPTION_MODEL") or "gpt-4o-transcribe"
 
 
 class RealtimeSession:
@@ -41,6 +98,7 @@ class RealtimeSession:
         voice: str = "alloy",
         logger: Optional[Logger] = None,
         on_turn_done: Optional[Callable] = None,
+        transcription_language: Optional[str] = None,
     ):
         self.websocket = websocket
         self.model = model
@@ -51,6 +109,9 @@ class RealtimeSession:
         self.tools: list[dict[str, Any]] = []
         self.tool_handlers: dict[str, Callable] = {}
         self.on_turn_done = on_turn_done  # async (user_text, assistant_text) -> None
+        # Two-letter transcription language from the browser's Accept-Language
+        # header, or None to omit the field (see transcription_language_for).
+        self.transcription_language = transcription_language
 
     def register_tool(
         self,
@@ -75,6 +136,29 @@ class RealtimeSession:
         to send to the browser — only the ephemeral value and model are included;
         the real API key is never forwarded.
         """
+        # audio.input configures natural turn-taking: semantic VAD instead of
+        # the API default server_vad (which cuts the user off after a 500 ms
+        # pause), input noise reduction, and a better transcription model.
+        # Field paths verified live 2026-11-12 — see
+        # docs/research/realtime-api-verified-2026-11-12.md.
+        audio_input: dict[str, Any] = {
+            "turn_detection": {
+                "type": "semantic_vad",
+                "eagerness": _vad_eagerness(),
+            },
+            "transcription": {
+                "model": _transcription_model(),
+                **(
+                    {"language": self.transcription_language}
+                    if self.transcription_language
+                    else {}
+                ),
+            },
+        }
+        noise_reduction = _noise_reduction_type()
+        if noise_reduction is not None:
+            audio_input["noise_reduction"] = {"type": noise_reduction}
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/realtime/client_secrets",
@@ -88,9 +172,7 @@ class RealtimeSession:
                         "model": self.model,
                         "audio": {
                             "output": {"voice": voice or self.voice},
-                            "input": {
-                                "transcription": {"model": "whisper-1"},
-                            },
+                            "input": audio_input,
                         },
                         "instructions": self.system_message,
                         "tools": self.tools,
