@@ -521,8 +521,13 @@ async def handle_media_stream(websocket: WebSocket):
     # Log only auth-related header names so credentials and proxy identity
     # values cannot leak into application logs.
     header_dict = dict(headers)
-    auth_relevant = [k.lower() for k in header_dict
-                     if any(k.lower().startswith(p) for p in ('x-forward', 'x-real', 'cookie', 'authorization'))]
+    auth_relevant = [
+        name.lower()
+        for name in header_dict
+        if name.lower().startswith(
+            ("x-forward", "x-authentik", "x-real", "cookie", "authorization")
+        )
+    ]
     logger.info(json.dumps({"event": "ws.connect", "session_id": session_id,
                             "auth_header_names": auth_relevant, "ts": time.time()}))
 

@@ -83,7 +83,7 @@ session.register_tool(
 
 ### Memory System
 
-- User identity from headers: `x-forwarded-user`, `x-forwarded-email`
+- User identity: a validated JWT takes precedence; otherwise a configured trusted socket peer can supply `X-authentik-email`/`X-authentik-username`, with `x-forwarded-email`/`x-forwarded-user` as fallbacks. Conflicting values between the header families reject the entire proxy identity. Email is the memory key when present, then username.
 - JSON file store: `/data/memory/{user_hash}.json`
 - Tools: `save_memory(fact)`, `recall_memories()`
 - Memories injected into system message at session start
@@ -159,14 +159,14 @@ pytest tests/security/
 - **Production cluster**: **ardenone-cluster** (`k8s/ardenone-cluster/ducke/` in `jedarden/declarative-config`), two Deployments behind a Cloudflare Tunnel: `duck-e` at `ducke.ardenone.com` (main) and `duck-e-demo` at `ducke-demo.ardenone.com` (public, cost-capped via `ducke-demo-config`). There is no apexalgo-iad or ghcr.io deployment — verified 2026-08-13.
 - **Auth** (since 2026-11-12, ducke-0556aec3): `ducke.ardenone.com` is gated by Authentik forward-auth (`authentik-forward-auth` middleware, embedded outpost, `forward_single`, `platform-admins`) on **every** route including the `/session` WebSocket — the outpost cookie is set on this host, so the same-origin upgrade carries it. Only `/outpost.goauthentik.io/` is unauthenticated. Authentik side: `ducke.yaml` + the embedded outpost's providers list in `declarative-config/k8s/ardenone-cluster/authentik/authentik-blueprints-configmap.yml`. The tailnet-only `duck-e-ducke-ardenone-cluster-ts.ardenone.com:8444` route stays unauthenticated by design; the demo host is public.
 - **Secrets** (no SealedSecrets since 2026-11-12, ducke-f2e5baa4): ExternalSecrets from OpenBao v2 — `ducke-openai` ← `secret/ardenone-cluster/ducke/openai` (OPENAI_API_KEY, both instances) and `ducke-valkey` ← `secret/ardenone-cluster/ducke/valkey-acl` (REDIS_URL for Valkey ACL user `ducke`, db 7, main instance only). Rotate by writing a new OpenBao version; Reloader restarts the pods.
-- **Storage**: `/data/memory` is an NFS-backed PVC (`ducke-memory`, `nfs-synology-apps` StorageClass). Still unused: Authentik sends `X-authentik-email`/`X-authentik-username`, but the app only reads `x-forwarded-email`/`x-forwarded-user` from `TRUSTED_PROXY_SOURCES` peers (unset). See Memory System gotcha below.
+- **Storage**: `/data/memory` is an NFS-backed PVC (`ducke-memory`, `nfs-synology-apps` StorageClass). The app can read Authentik identity headers from `TRUSTED_PROXY_SOURCES` peers, but that setting remains unset in production, so the PVC is still unused for per-user memory. See Memory System gotcha below.
 - **Metrics**: Prometheus metrics at `/metrics`
 
 ## Common Gotchas
 
 1. **Ephemeral key flow**: Never send real `OPENAI_API_KEY` to client. Only send `client_secret.value` from `/v1/realtime/sessions` response.
 2. **Voice change**: Uses OpenAI's `session.update` event (in-place update, no reinit needed). The WebRTC connection persists, PTT state is preserved, and the new voice applies to subsequent responses.
-3. **Memory persistence**: Requires user headers from reverse proxy — won't work in local dev without mocking headers. In production `/session` is now behind Authentik, but identity still doesn't reach the app: Authentik's headers are `X-authentik-*`, not `x-forwarded-*`, and `TRUSTED_PROXY_SOURCES` is unset — nothing has ever been persisted to `/data/memory` in the live deployment. Fixing this needs the app to accept the Authentik identity headers from a trusted peer (Traefik overwrites `X-authentik-*` via `authResponseHeaders`, so clients cannot spoof them) plus `TRUSTED_PROXY_SOURCES` on the Deployment.
+3. **Memory persistence**: Requires a JWT identity or identity headers from a configured trusted reverse proxy; local development needs a JWT or mocked trusted peer and headers. The app accepts `X-authentik-email`/`X-authentik-username` from trusted peers, and Traefik overwrites these through `authResponseHeaders` on the Authentik-protected production route. `TRUSTED_PROXY_SOURCES` is still unset in the Deployment, so those headers are ignored and nothing has yet been persisted to `/data/memory` in the live deployment. The deployment follow-up must configure trusted proxy sources and strip identity headers on unauthenticated routes.
 4. **AG2 references**: Code still uses `ag2.init` message type for client compatibility, but backend is custom `RealtimeSession`.
 5. **Cost display resets**: On reconnect, `resetCostState()` called in `main.js` → `connectAudio()`.
 6. **PTT mode persistence**: PTT state is stored in localStorage and restored on page load, but microphone state must be reapplied after connection establishes. See `toggleConnection()` in main.js lines 1124-1131 where saved PTT state determines whether mic starts enabled or disabled.

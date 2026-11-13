@@ -52,6 +52,88 @@ def test_proxy_identity_requires_the_socket_peer_to_match_a_configured_network()
     assert get_trusted_proxy_identity(spoofed_headers, "10.21.0.1", ()) == (None, None)
 
 
+def test_authentik_identity_from_trusted_peer():
+    headers = {
+        "X-authentik-username": "alice",
+        "X-authentik-email": "alice@example.com",
+    }
+    networks = parse_trusted_proxy_sources("10.20.0.0/16")
+
+    assert get_trusted_proxy_identity(headers, "10.20.1.2", networks) == (
+        "alice",
+        "alice@example.com",
+    )
+    assert get_trusted_proxy_identity(headers, "198.51.100.7", networks) == (
+        None,
+        None,
+    )
+
+
+def test_matching_authentik_and_forwarded_identity_is_accepted():
+    headers = {
+        "x-authentik-username": "alice",
+        "x-authentik-email": "alice@example.com",
+        "x-forwarded-user": "alice",
+        "x-forwarded-email": "alice@example.com",
+    }
+
+    assert get_trusted_proxy_identity(
+        headers, "10.20.1.2", parse_trusted_proxy_sources("10.20.0.0/16")
+    ) == ("alice", "alice@example.com")
+
+
+@pytest.mark.parametrize(
+    "conflicting_field",
+    ["x-forwarded-email", "x-forwarded-user"],
+)
+def test_conflicting_authentik_and_forwarded_identity_fails_closed(conflicting_field):
+    headers = {
+        "x-authentik-username": "alice",
+        "x-authentik-email": "alice@example.com",
+        "x-forwarded-user": "alice",
+        "x-forwarded-email": "alice@example.com",
+    }
+    headers[conflicting_field] = "someone-else"
+
+    assert get_trusted_proxy_identity(
+        headers, "10.20.1.2", parse_trusted_proxy_sources("10.20.0.0/16")
+    ) == (None, None)
+
+
+def test_duplicate_authentik_email_is_ignored():
+    headers = Headers(
+        raw=[
+            (b"x-authentik-username", b"alice"),
+            (b"x-authentik-email", b"alice@example.com"),
+            (b"x-authentik-email", b"someone-else@example.com"),
+        ]
+    )
+
+    assert get_trusted_proxy_identity(
+        headers, "10.20.1.2", parse_trusted_proxy_sources("10.20.0.0/16")
+    ) == ("alice", None)
+
+
+@pytest.mark.parametrize("raw_email", ["first,second", "first\x00second"])
+def test_malformed_authentik_email_is_ignored(raw_email):
+    headers = {"x-authentik-username": "alice", "x-authentik-email": raw_email}
+
+    assert get_trusted_proxy_identity(
+        headers, "10.20.1.2", parse_trusted_proxy_sources("10.20.0.0/16")
+    ) == ("alice", None)
+
+
+def test_forwarded_only_identity_from_trusted_peer_is_unchanged():
+    headers = {
+        "x-forwarded-user": "legacy-user",
+        "x-forwarded-email": "legacy@example.com",
+    }
+
+    assert get_trusted_proxy_identity(
+        headers, "10.20.1.2", parse_trusted_proxy_sources("10.20.0.0/16")
+    ) == ("legacy-user", "legacy@example.com")
+
+
 @pytest.mark.parametrize(
     "peer_host",
     [None, 167772161, "10.20.1.2,198.51.100.7", "10.20.1.2:443"],

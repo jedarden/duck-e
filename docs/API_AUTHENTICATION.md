@@ -4,6 +4,24 @@
 
 DUCK-E implements **optional JWT-based authentication** with tiered access levels. On optional-auth HTTP routes and the `/session` WebSocket, a request with no credential uses the free tier. Any supplied malformed, invalid, expired, revoked, or unsupported credential fails authentication; it never silently falls back to the free tier. Auth-required routes such as `/auth/me` return HTTP 401 when the credential is missing too.
 
+### Trusted reverse-proxy identity for memory
+
+The `/session` WebSocket can use proxy identity for per-user memory when its
+socket peer matches `TRUSTED_PROXY_SOURCES`. It reads `X-authentik-username` and
+`X-authentik-email`, falling back per field to `x-forwarded-user` and
+`x-forwarded-email`. If both families provide different valid values for the
+same field, the entire proxy identity is rejected. Duplicate, comma-separated,
+empty, or control-character values are ignored. A validated JWT identity takes
+precedence over proxy identity; without either, the session has no memory
+store or memory tools. Proxy identity does not grant a JWT tier.
+
+Only configure trusted proxy sources for peers that overwrite these headers
+from a verified authentication response. The production Authentik-protected
+route does this through Traefik's `authResponseHeaders`. The production
+Deployment has not yet configured `TRUSTED_PROXY_SOURCES`, so Authentik headers
+currently do not enable memory there. Its unauthenticated route also needs
+identity-header stripping before proxy trust is enabled.
+
 ## Authentication Design Principles
 
 1. **Optional Authentication**: Optional-auth routes and `/session` work without a credential at free-tier limits

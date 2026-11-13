@@ -79,12 +79,33 @@ def get_trusted_proxy_identity(
     peer_host: str | None,
     trusted_networks: tuple[ProxyNetwork, ...],
 ) -> tuple[str | None, str | None]:
-    """Return x-forwarded-user/email only when the socket peer is trusted."""
+    """Read Authentik or forwarded identity only from a trusted socket peer.
+
+    Authentik values take precedence per field. Conflicting valid values from
+    the two header families make the whole proxy identity ambiguous.
+    """
     if not is_trusted_proxy(peer_host, trusted_networks):
         return None, None
+
+    authentik_user = _single_header(headers, "x-authentik-username")
+    forwarded_user = _single_header(headers, "x-forwarded-user")
+    authentik_email = _single_header(headers, "x-authentik-email")
+    forwarded_email = _single_header(headers, "x-forwarded-email")
+
+    if (
+        authentik_user is not None
+        and forwarded_user is not None
+        and authentik_user != forwarded_user
+    ) or (
+        authentik_email is not None
+        and forwarded_email is not None
+        and authentik_email != forwarded_email
+    ):
+        return None, None
+
     return (
-        _single_header(headers, "x-forwarded-user"),
-        _single_header(headers, "x-forwarded-email"),
+        authentik_user or forwarded_user,
+        authentik_email or forwarded_email,
     )
 
 
@@ -115,9 +136,11 @@ def resolve_user_identity(
        tokens (``auth_method: google_oauth``) carry identity claims and
        resolve through this same path — they are not special-cased. Within
        a JWT, a usable ``email`` claim precedes the ``sub`` claim.
-    2. Without a JWT identity, trusted proxy ``x-forwarded-email`` precedes
-       ``x-forwarded-user``. Only values that passed the trusted-peer check
-       reach this function; untrusted headers never do.
+    2. Without a JWT identity, trusted proxy email precedes username.
+       ``get_trusted_proxy_identity`` accepts ``x-authentik-email`` and
+       ``x-authentik-username`` with ``x-forwarded-email`` and
+       ``x-forwarded-user`` fallbacks, and rejects conflicting values from
+       the two families. Untrusted headers never reach this function.
     3. With neither, the caller is anonymous and receives ``(None, None)``.
 
     Resolution is deterministic when identity inputs conflict or when a JWT

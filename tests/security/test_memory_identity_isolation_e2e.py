@@ -276,6 +276,8 @@ def test_spoofed_headers_from_untrusted_peer_cannot_select_victim_memory(
             "Origin": ORIGIN,
             "X-Forwarded-User": "victim@example.com",
             "X-Forwarded-Email": "victim@example.com",
+            "X-authentik-username": "victim",
+            "X-authentik-email": "victim@example.com",
             "X-Forwarded-For": TRUSTED_PEER,  # forged hop claim
         },
     ) as websocket:
@@ -372,7 +374,7 @@ def test_two_resolved_identities_remain_isolated_on_the_request_path(
 ):
     """Sessions for two identities on the same path never share memory.
 
-    One identity arrives through the trusted proxy's forwarded headers, the
+    One identity arrives through the trusted proxy's Authentik headers, the
     other through a JWT from an untrusted client; both read and write their
     own namespace and nothing else.
     """
@@ -386,18 +388,27 @@ def test_two_resolved_identities_remain_isolated_on_the_request_path(
     _seed_memory(session_env.memory_dir, alice_email, alice_seeded)
     _seed_memory(session_env.memory_dir, bob_email, bob_seeded)
 
-    # Session 1: proxy-resolved identity (trusted peer, no JWT).
+    # Session 1: Authentik identity from a trusted peer, without a JWT.
     alice_client = connect_as(TRUSTED_PEER)
     with alice_client.websocket_connect(
         "/session",
-        headers={"Origin": ORIGIN, "X-Forwarded-Email": alice_email},
+        headers={
+            "Origin": ORIGIN,
+            "X-authentik-username": "alice",
+            "X-authentik-email": alice_email,
+        },
     ) as websocket:
         assert websocket.receive_json()["type"] == "ducke.init"
 
         alice_session = session_env.sessions[0]
+        assert "save_memory" in alice_session["tools"]
+        assert "recall_memories" in alice_session["tools"]
         assert alice_seeded in alice_session["instructions"]
         assert alice_email in alice_session["instructions"]
         assert bob_seeded not in alice_session["instructions"]
+
+        recalled = _send_tool_call(websocket, "recall_memories", "alice-recall-1", {})
+        assert recalled == {"facts": [alice_seeded], "topic": None}
 
         saved = _send_tool_call(
             websocket,
