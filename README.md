@@ -150,9 +150,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 --no-proxy-headers --en
 
 ## Voices
 
-DUCK-E ships with 11 voices from the OpenAI Realtime API. Switch any time via the voice selector in the UI or by asking DUCK-E to change its voice mid-conversation:
+DUCK-E ships with 10 voices from the OpenAI Realtime API. Switch any time via the voice selector in the UI or by asking DUCK-E to change its voice mid-conversation:
 
-`alloy` · `ash` · `ballad` · `coral` · `echo` · `fable` · `nova` · `onyx` · `sage` · `shimmer` · `verse`
+`alloy` · `ash` · `ballad` · `coral` · `echo` · `sage` · `shimmer` · `verse` · `marin` · `cedar`
 
 ## License
 

@@ -20,7 +20,7 @@ import uuid
 # Import configuration module for automatic OAI_CONFIG_LIST generation
 from app.config import get_realtime_config, get_swarm_config, validate_config
 from app.memory import UserMemoryStore, FactCategory, FactSource
-from app.realtime_session import RealtimeSession, transcription_language_for
+from app.realtime_session import AVAILABLE_VOICES, RealtimeSession, transcription_language_for
 from app.prompts import build_base_system_message, build_time_section, resolve_timezone
 
 # Import security middleware
@@ -1391,17 +1391,14 @@ async def handle_media_stream(websocket: WebSocket):
 
     session.register_tool(
         name="change_voice",
-        description="Change the assistant's voice. Available voices: alloy, ash, ballad, coral, echo, fable, nova, onyx, sage, shimmer, verse",
+        description=f"Change the assistant's voice. Available voices: {', '.join(AVAILABLE_VOICES)}",
         handler=handle_voice_change,
         parameters={
             "type": "object",
             "properties": {
                 "voice": {
                     "type": "string",
-                    "enum": [
-                        "alloy", "ash", "ballad", "coral", "echo",
-                        "fable", "nova", "onyx", "sage", "shimmer", "verse"
-                    ],
+                    "enum": list(AVAILABLE_VOICES),
                     "description": "The voice to switch to"
                 }
             },

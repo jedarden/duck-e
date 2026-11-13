@@ -154,8 +154,8 @@ async def test_registered_tool_schemas_are_stable(tool_context):
         )
 
     assert tool_context.schemas["change_voice"]["parameters"]["properties"]["voice"]["enum"] == [
-        "alloy", "ash", "ballad", "coral", "echo", "fable", "nova",
-        "onyx", "sage", "shimmer", "verse",
+        "alloy", "ash", "ballad", "coral", "echo",
+        "sage", "shimmer", "verse", "marin", "cedar",
     ]
 
 
@@ -422,9 +422,9 @@ async def test_realtime_dispatch_sends_function_output_and_contains_handler_erro
 
 @pytest.mark.asyncio
 async def test_voice_tool_dispatches_and_reports_send_timeout(tool_context):
-    result = await tool_context.handlers["change_voice"]("nova")
-    assert result == "Voice changed to nova."
-    tool_context.session.change_voice.assert_awaited_once_with("nova")
+    result = await tool_context.handlers["change_voice"]("cedar")
+    assert result == "Voice changed to cedar."
+    tool_context.session.change_voice.assert_awaited_once_with("cedar")
 
     from app.realtime_session import RealtimeSession
 
@@ -437,6 +437,6 @@ async def test_voice_tool_dispatches_and_reports_send_timeout(tool_context):
         system_message="test",
     )
 
-    failure = await session.change_voice("nova")
+    failure = await session.change_voice("cedar")
 
     assert failure == "Failed to change voice: socket timed out"

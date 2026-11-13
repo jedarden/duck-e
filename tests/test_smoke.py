@@ -224,12 +224,12 @@ class TestTools:
         ws, msg = await _open_session()
         assert msg["type"] == "ducke.init"
         try:
-            result_msg = await _call_tool(ws, "change_voice", {"voice": "nova"})
+            result_msg = await _call_tool(ws, "change_voice", {"voice": "cedar"})
         finally:
             await ws.close()
 
         output = result_msg["item"]["output"]
-        assert "nova" in output.lower() or "voice" in output.lower(), \
+        assert "cedar" in output.lower() or "voice" in output.lower(), \
             f"Unexpected voice change response: {output}"
         assert "error" not in output.lower() or "invalid" not in output.lower(), \
             f"Voice change error: {output}"

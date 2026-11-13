@@ -16,9 +16,12 @@ from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 
+# Voices the Realtime API accepts for audio.output.voice (verified live
+# 2026-11-12 — see docs/research/realtime-api-verified-2026-11-12.md).
+# fable/nova/onyx are text-to-speech voices and are rejected with HTTP 400.
 AVAILABLE_VOICES = [
     "alloy", "ash", "ballad", "coral", "echo",
-    "fable", "nova", "onyx", "sage", "shimmer", "verse"
+    "sage", "shimmer", "verse", "marin", "cedar",
 ]
 
 # Two-letter transcription language codes the Realtime API accepts for

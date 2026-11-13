@@ -42,7 +42,7 @@ class TestVoiceChange:
         """Test that AVAILABLE_VOICES contains expected voices."""
         expected_voices = [
             "alloy", "ash", "ballad", "coral", "echo",
-            "fable", "nova", "onyx", "sage", "shimmer", "verse"
+            "sage", "shimmer", "verse", "marin", "cedar",
         ]
         for voice in expected_voices:
             assert voice in AVAILABLE_VOICES
@@ -57,7 +57,7 @@ class TestVoiceChange:
 
     def test_change_voice_valid_voice_sends_session_update(self, session, mock_websocket):
         """Test that change_voice sends ducke.session_update message."""
-        result = asyncio.run(session.change_voice("nova"))
+        result = asyncio.run(session.change_voice("cedar"))
 
         # Verify the message was sent
         assert mock_websocket.send_json.called
@@ -67,7 +67,7 @@ class TestVoiceChange:
         assert sent_message["type"] == "ducke.session_update"
         assert "update" in sent_message
         assert sent_message["update"]["type"] == "session.update"
-        assert sent_message["update"]["session"]["voice"] == "nova"
+        assert sent_message["update"]["session"]["voice"] == "cedar"
 
     def test_change_voice_updates_session_voice(self, session, mock_websocket):
         """Test that change_voice updates the session's voice attribute."""
@@ -137,7 +137,7 @@ class TestVoiceChangeMessageFormat:
         - type: "session.update"
         - session.voice: <voice name>
         """
-        asyncio.run(session.change_voice("nova"))
+        asyncio.run(session.change_voice("cedar"))
 
         sent_message = mock_websocket.send_json.call_args[0][0]
         update = sent_message["update"]
@@ -145,7 +145,7 @@ class TestVoiceChangeMessageFormat:
         # Verify format
         assert update["type"] == "session.update"
         assert "voice" in update["session"]
-        assert update["session"]["voice"] == "nova"
+        assert update["session"]["voice"] == "cedar"
 
     def test_session_update_does_not_call_ephemeral_key_endpoint(self, session, mock_websocket):
         """
@@ -167,14 +167,14 @@ class TestVoiceChangeMessageFormat:
         The session.update should only include the voice field,
         not modify other session settings like tools or instructions.
         """
-        asyncio.run(session.change_voice("onyx"))
+        asyncio.run(session.change_voice("marin"))
 
         sent_message = mock_websocket.send_json.call_args[0][0]
         session_obj = sent_message["update"]["session"]
 
         # Should only have voice
         assert "voice" in session_obj
-        assert session_obj["voice"] == "onyx"
+        assert session_obj["voice"] == "marin"
 
         # Should NOT have tools or instructions in the update
         # (those are set during initial session creation)
