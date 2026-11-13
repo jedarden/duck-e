@@ -58,7 +58,25 @@ pip install -r requirements-dev.txt
 python3 -m pytest -q tests/test_cost_enforcement.py tests/test_ptt_integration.py   # definition of done
 python3 -m pytest -q                                                                # full suite
 python3 -m pytest -q tests/security/                                                # security tests
+node --test "tests/frontend/*.test.mjs"                                             # browser-script behaviour
 ```
+
+**Browser scripts are tested by behaviour.** `tests/frontend/harness.mjs` loads
+the real `ducke.js` and `main.js` into a Node `vm` context with a fake DOM,
+WebSocket, RTCPeerConnection and microphone — no `npm install`, no browser.
+Any change to `app/website_files/static/` needs a `tests/frontend/*.test.mjs`
+test that performs the interaction (see `smoke.test.mjs` for the three entry
+points: `connectBridge`, `loadPage`, `connectPage`). The `tests/test_*.py`
+files that search the JS source for strings (for example
+`tests/test_ptt_integration.py`) still gate every change, so keep the handler
+shapes they match.
+
+**Realtime API field names are recorded, not guessed.**
+`docs/research/realtime-api-verified-2026-11-12.md` lists the session fields,
+voices, event names and error cases verified against the live API, and
+`tests/live/realtime_api_check.py` re-checks them (it needs `OPENAI_API_KEY`
+in the environment; its docstring shows how to pass the key by reference).
+Unit tests never call the live API.
 
 `cargo`-style remote CI does not apply here; CI is Argo Workflows (see below).
 

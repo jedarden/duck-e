@@ -6,3 +6,4 @@ gates:
     run_in: clean
     commands:
       - python3 -m pytest -q tests/test_cost_enforcement.py tests/test_ptt_integration.py
+      - node --test "tests/frontend/*.test.mjs"
