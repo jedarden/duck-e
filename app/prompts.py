@@ -3,7 +3,16 @@
 Everything DUCK-E says is heard, not read, so the base prompt is written for
 speech: brief by default, longer when the user asks for detail, and never
 reading URLs, markdown or raw tool output aloud.
+
+The prompt is assembled at session start: the base template above, then a
+date-and-time section (so "what day is it?" gets a correct answer), then the
+per-user memory section.
 """
+
+import re
+from datetime import datetime
+from typing import Optional
+from zoneinfo import ZoneInfo
 
 _PROMPT_TEMPLATE = """\
 # Role
@@ -30,6 +39,51 @@ The user's browser language is <language>{language}</language>. Reply in the lan
 - Current events, recent facts, anything you are unsure of: use web_search. To read a specific page the user names, use web_fetch.
 - Before a tool that takes a while (web_search, web_fetch), say one short line first, such as "Let me look that up." Call quick tools (weather, memory, voice) without announcing them.
 - When a tool returns, give the answer in your own spoken words; never read the raw result. If a tool fails, say so plainly and offer one alternative."""
+
+# Weekday and month names are spelled out here rather than taken from
+# strftime so the section is identical regardless of the server's locale.
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday",
+             "Friday", "Saturday", "Sunday")
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December")
+
+# The browser sends an IANA zone name as a WebSocket query parameter, so it is
+# untrusted input: bound the length and the character set before handing it to
+# ZoneInfo, and fall back to UTC for anything else.
+_TZ_NAME_MAX_LEN = 64
+_TZ_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_+\-/]+$")
+
+
+def resolve_timezone(raw: Optional[str]) -> ZoneInfo:
+    """Return the zone named by ``raw``, or UTC when ``raw`` is not a safe,
+    resolvable IANA zone name. Never raises."""
+    if (
+        isinstance(raw, str)
+        and len(raw) <= _TZ_NAME_MAX_LEN
+        and _TZ_NAME_PATTERN.match(raw) is not None
+    ):
+        try:
+            return ZoneInfo(raw)
+        except Exception:
+            pass
+    return ZoneInfo("UTC")
+
+
+def build_time_section(now: datetime, tz_name: str) -> str:
+    """Return the date-and-time block appended to the system message.
+
+    ``now`` is the session start time in the user's timezone; ``tz_name`` is
+    that timezone's IANA name, shown so the model can reason about the zone.
+    """
+    return (
+        f"\n\n# Date and time\n"
+        f"When this conversation started it was "
+        f"{_WEEKDAYS[now.weekday()]}, {now.day} {_MONTHS[now.month - 1]} "
+        f"{now.year}, {now.strftime('%H:%M')} in the user's timezone "
+        f"({tz_name}). Use this for questions about today's date, the day of "
+        f"the week or the time. In a long conversation, say the time is "
+        f"approximate."
+    )
 
 
 def build_base_system_message(language: str) -> str:

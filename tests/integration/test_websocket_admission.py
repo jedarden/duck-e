@@ -34,7 +34,8 @@ class AdmissionWebSocket:
         }
         self.client = SimpleNamespace(host="127.0.0.1")
         self.query_params = SimpleNamespace(
-            getlist=lambda name: [token] if name == "token" else []
+            getlist=lambda name: [token] if name == "token" else [],
+            get=lambda name: token if name == "token" else None,
         )
         self.scope = {}
         self.sent = []

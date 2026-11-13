@@ -76,7 +76,7 @@ async def tool_context(monkeypatch):
     websocket = MagicMock()
     websocket.headers = {"origin": "http://localhost:8000", "host": "localhost:8000"}
     websocket.client = None
-    websocket.query_params = SimpleNamespace(getlist=lambda name: [])
+    websocket.query_params = SimpleNamespace(getlist=lambda name: [], get=lambda name: None)
     websocket.scope = {}
     websocket.url = "ws://localhost/session"
     websocket.send_json = AsyncMock()

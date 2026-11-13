@@ -64,7 +64,7 @@ class ScriptedWebSocket:
             "accept-language": "en-US",
         }
         self.client = None
-        self.query_params = SimpleNamespace(getlist=lambda name: [])
+        self.query_params = SimpleNamespace(getlist=lambda name: [], get=lambda name: None)
         self.scope = {}
         self._incoming = []
         self._idle = asyncio.Event()
@@ -195,7 +195,8 @@ def authenticated_socket(tier, monkeypatch):
     token = auth.create_access_token({"sub": f"test-{tier}", "tier": tier})
     ws = ScriptedWebSocket()
     ws.query_params = SimpleNamespace(
-        getlist=lambda name: [token] if name == "token" else []
+        getlist=lambda name: [token] if name == "token" else [],
+        get=lambda name: token if name == "token" else None,
     )
     return ws
 

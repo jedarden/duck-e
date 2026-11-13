@@ -367,6 +367,18 @@ const getWebSocketUrl = () => {
     url.searchParams.set('token', oauthToken);
   }
 
+  // The server tells the model the user's local date and time; it needs the
+  // IANA zone name for that. Browsers without Intl (or without a zone) simply
+  // connect without it and the server falls back to UTC.
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz) {
+      url.searchParams.set('tz', tz);
+    }
+  } catch (err) {
+    console.warn('Timezone not available for session URL:', err);
+  }
+
   return url.toString();
 };
 

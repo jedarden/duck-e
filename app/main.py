@@ -21,7 +21,7 @@ import uuid
 from app.config import get_realtime_config, get_swarm_config, validate_config
 from app.memory import UserMemoryStore, FactCategory, FactSource
 from app.realtime_session import RealtimeSession, transcription_language_for
-from app.prompts import build_base_system_message
+from app.prompts import build_base_system_message, build_time_section, resolve_timezone
 
 # Import security middleware
 from app.middleware import (
@@ -748,6 +748,14 @@ async def handle_media_stream(websocket: WebSocket):
         # Build system message, optionally augmented with user identity and memories
         base_system_message = build_base_system_message(safe_language)
 
+        # Date-and-time section: the browser sends its IANA timezone as the
+        # "tz" query parameter so the model can answer date/time questions in
+        # the user's local terms. Anything unresolvable or unsafe is UTC.
+        session_tz = resolve_timezone(websocket.query_params.get("tz"))
+        system_message = base_system_message + build_time_section(
+            datetime.now(session_tz), str(session_tz)
+        )
+
         if memory_store is not None:
             user_display = user_display_name or user_identity
             summary = await memory_store.get_or_generate_summary(first_config["api_key"])
@@ -770,9 +778,7 @@ async def handle_media_stream(websocket: WebSocket):
                 "Use recall_memories to retrieve what you know about the user on demand; "
                 "pass a topic to filter for relevant facts only."
             )
-            system_message = base_system_message + memory_section
-        else:
-            system_message = base_system_message
+            system_message += memory_section
 
         _extraction_api_key = first_config["api_key"]
 
